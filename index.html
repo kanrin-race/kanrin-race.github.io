@@ -1009,7 +1009,7 @@ function peerRoomApi(){
       onPeers:(h,onErr)=>{hs.push(h);if(onErr)errs.push(onErr);fire();return()=>{const i=hs.indexOf(h);if(i>=0)hs.splice(i,1);};},
       peers:()=>list(),
       connected:()=>!closed,
-      leave:async()=>{closed=true;try{peer.destroy();}catch(e){}}
+      leave:async()=>{if(closed)return;closed=true;try{if(hostConn)hostConn.send({t:'bye'});}catch(e){}setTimeout(()=>{try{peer.destroy();}catch(e){}},150);}
     };
     peer.on('error',e=>{const t=e&&e.type;
       if(t==='unavailable-id')fail('room_taken');
@@ -1020,25 +1020,46 @@ function peerRoomApi(){
       if(isHost){settled=true;resolve(api);return;}
       hostConn=peer.connect(hostId,{reliable:true});
       const to=setTimeout(()=>fail('no_host'),9000);
-      hostConn.on('open',()=>{clearTimeout(to);settled=true;resolve(api);});
+      hostConn.on('open',()=>{clearTimeout(to);settled=true;resolve(api);
+        const hb=setInterval(()=>{if(closed){clearInterval(hb);return;}try{hostConn.send({t:'hb'});}catch(e){}},2000);});
       hostConn.on('data',d=>{if(!d||d.t!=='all'||!Array.isArray(d.all))return;const mine=pres.get(myId);const seen=new Set([myId]);
         for(const [id,p] of d.all){if(id===myId)continue;seen.add(id);setP(id,p);}
         for(const id of [...pres.keys()])if(!seen.has(id))pres.delete(id);
         pres.set(myId,mine);fire();});
       hostConn.on('close',()=>{for(const id of [...pres.keys()])if(id!==myId)pres.delete(id);fire();});
     });
-    if(isHost)peer.on('connection',c=>{
-      c.on('open',()=>{conns.set(c.peer,c);if(conns.size>7){c.close();return;}broadcast();});
-      c.on('data',d=>{if(d&&d.t==='p'&&d.patch&&typeof d.patch==='object'){merge(c.peer,d.patch);broadcast();}});
-      c.on('close',()=>{conns.delete(c.peer);pres.delete(c.peer);broadcast();});
-    });
+    const seen=new Map();
+    const drop=id=>{const c=conns.get(id);conns.delete(id);seen.delete(id);pres.delete(id);try{c&&c.close();}catch(e){}};
+    if(isHost){
+      peer.on('connection',c=>{
+        c.on('open',()=>{conns.set(c.peer,c);seen.set(c.peer,Date.now());if(conns.size>7){drop(c.peer);return;}broadcast();});
+        c.on('data',d=>{if(!d)return;seen.set(c.peer,Date.now());
+          if(d.t==='bye'){drop(c.peer);broadcast();return;}
+          if(d.t==='p'&&d.patch&&typeof d.patch==='object'){
+            if(typeof d.patch.cid==='string')for(const [id,pr] of [...pres.entries()])if(id!==c.peer&&pr&&pr.cid===d.patch.cid)drop(id);
+            merge(c.peer,d.patch);broadcast();}});
+        c.on('close',()=>{if(conns.get(c.peer)===c){drop(c.peer);broadcast();}});
+        c.on('error',()=>{if(conns.get(c.peer)===c){drop(c.peer);broadcast();}});
+      });
+      const hb=setInterval(()=>{if(closed){clearInterval(hb);return;}
+        const now=Date.now();let ch=false;
+        for(const [id,t] of [...seen.entries()])if(now-t>8000){drop(id);ch=true;}
+        if(ch)broadcast();},2000);
+    }
   })};
 }
 const inClaude=!!(window.claude&&window.claude.use);
 const roomP=(inClaude?window.claude.use('room'):Promise.resolve(peerRoomApi())).catch(()=>null);
 const CODE_CH='abcdefghjkmnpqrstuvwxyz23456789';
 function onlineMsg(t){$('onlineMsg').textContent=t;}
+let joining=false;
+const CID=(()=>{let v=null;try{v=sessionStorage.getItem('kanrin-cid');}catch(e){}if(!v){v=Math.random().toString(36).slice(2,10);try{sessionStorage.setItem('kanrin-cid',v);}catch(e){}}return v;})();
 async function openRoom(code,isHost){
+  if(joining||S.online)return;
+  joining=true;$('createBtn').disabled=$('joinBtn').disabled=true;
+  try{await openRoomInner(code,isHost);}finally{joining=false;$('createBtn').disabled=$('joinBtn').disabled=false;}
+}
+async function openRoomInner(code,isHost){
   const nick=($('nick').value||'').trim().slice(0,8);
   if(!nick){onlineMsg('ニックネームを入れてください。');$('nick').focus();return;}
   store.set('kanrin-nick',nick);
@@ -1050,7 +1071,7 @@ async function openRoom(code,isHost){
     onlineMsg(c==='no_host'?'その部屋コードの部屋が見つかりません。コードを確かめてください。':c==='room_taken'?'部屋を作れませんでした。もう一度「部屋を作る」を押してください。':'部屋に入れませんでした（'+(c||'エラー')+'）。少し待ってもう一度試してください。');return;}
   const color=store.get('kanrin-color')||COLORS[Math.floor(Math.random()*COLORS.length)];
   S.online={nr,code,isHost,nick,color,round:0,raceKey:null,peers:[],myPeer:null,hostState:{phase:'lobby',round:0},cpu:true,think:90,joinedAt:performance.now()};
-  const base={nick,color,round:0,locked:false,ch:null,jt:Date.now()};
+  const base={nick,color,round:0,locked:false,ch:null,jt:Date.now(),cid:CID};
   if(isHost)Object.assign(base,{host:true,phase:'lobby',hround:0,seed:0,think:90,cpu:1,race:null});
   try{await nr.presence(base);}catch(e){}
   nr.onPeers(ch=>onPeers(ch.peers),e=>{onlineMsg('接続が切れました（'+e.code+'）。');});
@@ -1087,7 +1108,11 @@ function hostPeer(){
 const MAX_ONLINE=4;
 function members(){
   if(!S.online)return[];
-  const ms=S.online.peers.filter(p=>p.presence&&typeof p.presence.nick==='string');
+  const byCid=new Map();
+  for(const p of S.online.peers){if(!(p.presence&&typeof p.presence.nick==='string'))continue;
+    const k=typeof p.presence.cid==='string'?p.presence.cid:p.peer;const cur=byCid.get(k);
+    if(!cur||p.sameTab||(!cur.sameTab&&p.updatedAt>cur.updatedAt))byCid.set(k,p);}
+  const ms=[...byCid.values()];
   ms.sort((a,b)=>(b.presence.host===true)-(a.presence.host===true)||(+a.presence.jt||0)-(+b.presence.jt||0)||(a.peer<b.peer?-1:1));
   return ms.slice(0,MAX_ONLINE);
 }
@@ -1213,6 +1238,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+window.addEventListener('pagehide',()=>{if(S.online){try{S.online.nr.leave();}catch(e){}}});
 window.addEventListener('resize',()=>{if(S.screen==='think')drawOverview();});
 document.fonts.ready.then(()=>{if(S.screen==='think')drawOverview();});
 POOL.forEach(ch=>analyze(ch));
