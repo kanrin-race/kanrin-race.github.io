@@ -129,7 +129,7 @@ td.k{font-weight:900;font-size:22px}
     <div id="localOpts" class="scr" style="gap:12px">
       <p class="muted" id="taNote" hidden>全地形が同じ長さずつ並んだ固定コースを1人で走ります。揺らぎなしで毎回同じ結果になるので、組み合わせを詰めて自己ベストを狙えます。</p>
       <div class="row" id="thinkRow"><span class="label lbl">考える時間</span>
-        <div class="seg" id="thinkSeg"><button data-v="20" aria-pressed="false">20秒</button><button data-v="30" aria-pressed="true">30秒</button><button data-v="60" aria-pressed="false">60秒</button></div></div>
+        <span>90秒</span></div>
       <div class="row"><button class="btn primary" id="goBtn">コースを生成してスタート</button></div>
     </div>
     <div id="onlineOpts" class="scr" style="gap:12px" hidden>
@@ -163,8 +163,7 @@ td.k{font-weight:900;font-size:22px}
   </div>
   <div class="panel"><span class="label">参加者（4人まで）</span><ul class="members" id="memberList"></ul></div>
   <div class="panel" id="hostCtl">
-    <div class="row"><span class="label lbl">考える時間</span>
-      <div class="seg" id="thinkSeg2"><button data-v="20" aria-pressed="false">20秒</button><button data-v="30" aria-pressed="true">30秒</button><button data-v="60" aria-pressed="false">60秒</button></div></div>
+    <div class="row"><span class="label lbl">考える時間</span><span>90秒</span></div>
     <div class="row"><span class="label lbl">CPU</span>
       <div class="seg" id="cpuSeg"><button data-v="1" aria-pressed="true">4台までCPUで埋める</button><button data-v="0" aria-pressed="false">人だけで走る</button></div></div>
     <div class="row"><button class="btn primary" id="hostStartBtn">コースを生成してスタート</button></div>
@@ -468,7 +467,7 @@ function fitCanvas(cv){
 }
 
 /* ---------- 状態 ---------- */
-const S={screen:'title',mode:1,think:30,course:null,players:[],racers:[],t:0,phase:'',count:0,doneAt:0,cams:[],thinkEnd:0,online:null};
+const S={screen:'title',mode:1,think:90,course:null,players:[],racers:[],t:0,phase:'',count:0,doneAt:0,cams:[],thinkEnd:0,online:null};
 const POOL=['円','丸','回','口','田','目','日','米','木','山','水','火','一','二','三','川','十','人','大','王','車','風','心','乙','己','刀','力','卍','井','中','手','石','鬱','龍','又','入','小','亀','巛','皿','門','品','器','森','雪','議','轟','雨','州'];
 const CPU_NAMES=[['CPU 疾風',14],['CPU 並足',5],['CPU 気まぐれ',1],['CPU 迷走',1]];
 const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}}};
@@ -485,7 +484,6 @@ function segSetup(seg,cb){
 
 /* ---------- タイトル ---------- */
 segSetup($('modeSeg'),v=>{S.mode=+v;$('localOpts').hidden=S.mode===0;$('onlineOpts').hidden=S.mode!==0;$('thinkRow').hidden=S.mode===3;$('taNote').hidden=S.mode!==3;$('goBtn').textContent=S.mode===3?'タイムアタック開始':'コースを生成してスタート';});
-segSetup($('thinkSeg'),v=>S.think=+v);
 $('nick').value=store.get('kanrin-nick')||'';
 const TIPS={
   flat:{ks:['口','田','回'],t:'四角くまとまった字は平地',d:'輪郭が円に近いほど平らな道で速い。口や田が得意',sp:75},
@@ -1051,9 +1049,9 @@ async function openRoom(code,isHost){
   try{nr=await room.join('kanrin-'+code,isHost);}catch(e){const c=e&&e.code;
     onlineMsg(c==='no_host'?'その部屋コードの部屋が見つかりません。コードを確かめてください。':c==='room_taken'?'部屋を作れませんでした。もう一度「部屋を作る」を押してください。':'部屋に入れませんでした（'+(c||'エラー')+'）。少し待ってもう一度試してください。');return;}
   const color=store.get('kanrin-color')||COLORS[Math.floor(Math.random()*COLORS.length)];
-  S.online={nr,code,isHost,nick,color,round:0,raceKey:null,peers:[],myPeer:null,hostState:{phase:'lobby',round:0},cpu:true,think:30,joinedAt:performance.now()};
+  S.online={nr,code,isHost,nick,color,round:0,raceKey:null,peers:[],myPeer:null,hostState:{phase:'lobby',round:0},cpu:true,think:90,joinedAt:performance.now()};
   const base={nick,color,round:0,locked:false,ch:null,jt:Date.now()};
-  if(isHost)Object.assign(base,{host:true,phase:'lobby',hround:0,seed:0,think:30,cpu:1,race:null});
+  if(isHost)Object.assign(base,{host:true,phase:'lobby',hround:0,seed:0,think:90,cpu:1,race:null});
   try{await nr.presence(base);}catch(e){}
   nr.onPeers(ch=>onPeers(ch.peers),e=>{onlineMsg('接続が切れました（'+e.code+'）。');});
   $('roomCode').textContent=code.toUpperCase();
@@ -1078,7 +1076,6 @@ function leaveRoom(){
   S.online=null;show('title');onlineMsg('部屋を出ました。');
 }
 $('leaveBtn').onclick=leaveRoom;
-segSetup($('thinkSeg2'),v=>{if(S.online)S.online.think=+v;});
 segSetup($('cpuSeg'),v=>{if(S.online)S.online.cpu=v==='1';});
 function hostPeer(){
   const o=S.online;if(!o)return null;
@@ -1140,7 +1137,7 @@ function applyHost(h){
   if(h.phase==='lobby'&&S.screen!=='lobby'&&o.round!==-1&&o.hostState.phase!=='lobby'){o.hostState={phase:'lobby'};showLobby();return;}
   if(h.phase==='think'&&typeof h.hround==='number'&&h.hround!==o.round){
     o.round=h.hround;o.hostState={phase:'think'};
-    S.course=genCourse(h.seed|0);S.think=clamp(+h.think||30,5,120);
+    S.course=genCourse(h.seed|0);S.think=90;
     setupPlayers(true);enterThink();pushChoice();return;
   }
   if(h.phase==='race'&&h.race&&h.race.key&&h.race.key!==o.raceKey&&Array.isArray(h.race.racers)){
