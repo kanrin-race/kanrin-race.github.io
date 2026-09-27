@@ -176,7 +176,7 @@ td.k{font-weight:900;font-size:22px}
 <section id="scrThink" class="scr" hidden>
   <div class="row" style="justify-content:space-between">
     <h2>コース一望</h2>
-    <span class="muted" id="courseInfo"></span>
+    <div class="row"><span class="muted" id="courseInfo"></span><button class="btn quit">やめる</button></div>
   </div>
   <canvas id="overview"></canvas>
   <div class="legend" id="legend"></div>
@@ -195,7 +195,7 @@ td.k{font-weight:900;font-size:22px}
     <canvas id="race"></canvas>
     <div class="hud"><div class="clock" id="clock">0.00</div><ol id="rankList"></ol></div>
   </div>
-  <div class="row"><div class="seg small" id="speedSeg" hidden><button data-v="1" aria-pressed="true">等速</button><button data-v="2" aria-pressed="false">2倍速</button><button data-v="4" aria-pressed="false">4倍速</button></div><span class="muted" id="raceNote"></span></div>
+  <div class="row"><button class="btn quit">やめる</button><div class="seg small" id="speedSeg" hidden><button data-v="1" aria-pressed="true">等速</button><button data-v="2" aria-pressed="false">2倍速</button><button data-v="4" aria-pressed="false">4倍速</button></div><span class="muted" id="raceNote"></span></div>
   <div class="scr" id="camCtl" style="gap:8px" hidden></div>
 </section>
 
@@ -206,8 +206,8 @@ td.k{font-weight:900;font-size:22px}
   <div class="tablewrap"><table id="resTable"></table></div>
   <div class="scr" id="taBox" hidden><h2>自己ベスト</h2><p class="muted">この端末のブラウザに保存されます。</p><div class="tablewrap"><table id="taTable"></table></div></div>
   <div class="row" id="resLocal"><button class="btn primary" id="againBtn">同じコースで再戦</button><button class="btn" id="newBtn">新しいコース</button><button class="btn" id="titleBtn">タイトルへ</button></div>
-  <div class="row" id="resHost" hidden><button class="btn primary" id="hAgainBtn">同じコースで次のレース</button><button class="btn" id="hNewBtn">新しいコースで次のレース</button><button class="btn" id="hLobbyBtn">部屋に戻る</button></div>
-  <p class="muted" id="resGuest" hidden>ホストが次のレースを始めるのを待っています。</p>
+  <div class="row" id="resHost" hidden><button class="btn primary" id="hAgainBtn">同じコースで次のレース</button><button class="btn" id="hNewBtn">新しいコースで次のレース</button><button class="btn" id="hLobbyBtn">部屋に戻る</button><button class="btn quit">部屋を出る</button></div>
+  <div class="row" id="resGuest" hidden><span class="muted">ホストが次のレースを始めるのを待っています。</span><button class="btn quit">部屋を出る</button></div>
 </section>
 
 </div>
@@ -742,6 +742,7 @@ async function startLocalRace(){
   S.screen='starting';
   await ensurePlayersReady();
   await Promise.all(POOL.map(analyze));
+  if(S.screen!=='starting')return;
   const specs=S.players.map(p=>specFromPlayer(p));
   if(isTA()){const b=loadTA()[0];if(b)specs.push({n:'ベスト '+b.t.toFixed(2),c:b.c,fr:b.fr,sz:b.sz,r:b.r,f:b.f,a:b.a,acc:b.acc,h:0,g:1});}
   else specs.push(...cpuSpecs(4-specs.length,specs.map(s=>s.c),Math.random));
@@ -1067,6 +1068,11 @@ function showLobby(){
   $('lobbyWait').hidden=S.online.isHost;
   renderMembers();
 }
+function quitToTitle(){
+  if(S.online){leaveRoom();return;}
+  S.phase='';show('title');
+}
+document.addEventListener('click',e=>{if(e.target.closest('.quit'))quitToTitle();});
 function leaveRoom(){
   if(S.online){try{S.online.nr.leave().catch(()=>{});}catch(e){}}
   S.online=null;show('title');onlineMsg('部屋を出ました。');
@@ -1172,6 +1178,7 @@ async function hostFinalize(){
   const o=S.online;if(!o||o.finalizing)return;o.finalizing=true;
   await ensurePlayersReady();
   await Promise.all(POOL.map(analyze));
+  if(S.online!==o)return;
   pushChoice();
   const ms=members().filter(p=>p.presence.round===o.round&&!p.sameTab);
   ms.sort((a,b)=>a.peer<b.peer?-1:1);
