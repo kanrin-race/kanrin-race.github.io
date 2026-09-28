@@ -137,7 +137,7 @@ td.k{font-weight:900;font-size:22px}
     <div class="row"><span class="label lbl">遊び方</span>
       <div class="seg" id="modeSeg"><button data-v="1" aria-pressed="true">1人（CPU×3）</button><button data-v="2" aria-pressed="false">2人（同じ画面）</button><button data-v="0" aria-pressed="false">オンライン対戦</button><button data-v="3" aria-pressed="false">タイムアタック</button></div></div>
     <div id="localOpts" class="scr" style="gap:12px">
-      <p class="muted" id="taNote" hidden>全地形が同じ長さずつ並んだ固定コースを1人で走ります。揺らぎなしで毎回同じ結果になるので、組み合わせを詰めて自己ベストを狙えます。</p>
+      <p class="muted" id="taNote" hidden>日替わりの「今日のコース」を1人で走ります。コースは日本時間の0時に変わり、その日は誰が遊んでも同じコースです。揺らぎなしで毎回同じ結果になるので、組み合わせを詰めて自己ベストを狙えます。</p>
       <div class="row" id="thinkRow"><span class="label lbl">考える時間</span>
         <span>90秒</span></div>
       <div class="row"><button class="btn primary" id="goBtn">コースを生成してスタート</button></div>
@@ -215,7 +215,7 @@ td.k{font-weight:900;font-size:22px}
   <h2>結果</h2>
   <p class="win" id="winLine"></p>
   <div class="tablewrap"><table id="resTable"></table></div>
-  <div class="scr" id="taBox" hidden><h2>自己ベスト</h2><p class="muted">この端末のブラウザに保存されます。</p><div class="tablewrap"><table id="taTable"></table></div></div>
+  <div class="scr" id="taBox" hidden><h2>今日の自己ベスト</h2><p class="muted" id="taDay">この端末のブラウザに保存されます。</p><div class="tablewrap"><table id="taTable"></table></div></div>
   <div class="row" id="resLocal"><button class="btn primary" id="againBtn">同じコースで再戦</button><button class="btn" id="newBtn">新しいコース</button><button class="btn" id="titleBtn">タイトルへ</button></div>
   <div class="row" id="resHost" hidden><button class="btn primary" id="hAgainBtn">同じコースで次のレース</button><button class="btn" id="hNewBtn">新しいコースで次のレース</button><button class="btn" id="hLobbyBtn">部屋に戻る</button><button class="btn quit">部屋を出る</button></div>
   <div class="row" id="resGuest" hidden><span class="muted">ホストが次のレースを始めるのを待っています。</span><button class="btn quit">部屋を出る</button></div>
@@ -627,23 +627,18 @@ function drawBushes(ctx,x0,x1,y,scale){
     ctx.beginPath();ctx.arc(x,y-rr*0.4,rr,0,TAU);ctx.arc(x+rr*0.9,y-rr*0.2,rr*0.8,0,TAU);ctx.fill();
   }
 }
-$('goBtn').onclick=()=>{S.course=S.mode===3?fixedCourse():genCourse((Math.random()*2**31)|0);setupPlayers(false);enterThink();};
+$('goBtn').onclick=()=>{S.course=S.mode===3?dailyCourse():genCourse((Math.random()*2**31)|0);setupPlayers(false);enterThink();};
 const isTA=()=>S.mode===3&&!S.online;
-function fixedCourse(){
-  const order=['flat','up','snow','down','water','bush','mud','flat','up','mud','down','bush','snow','water'];
-  const segs=[];let x=0,h=0;
-  const add=(type,len,dh,depth)=>{segs.push({type,x0:x,x1:x+len,h0:h,h1:h+dh,depth:depth||0});x+=len;h+=dh;};
-  add('flat',420,0);
-  for(const t of order){
-    if(t==='up')add('up',420,160);else if(t==='down')add('down',420,-160);
-    else if(t==='water')add('water',420,0,95);else add(t,420,0);
-  }
-  add('flat',460,0);
-  return{seed:20260927,segs,length:x,finishX:x-260,fixed:true};
-}
-const TA_KEY='kanrin-ta-v4';
-function loadTA(){try{const v=JSON.parse(store.get(TA_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return[];}}
-function saveTA(list){store.set(TA_KEY,JSON.stringify(list.slice(0,10)));}
+// 日本時間の日付から今日のコースを作る（同じ日なら全員同じコース）
+function jstDay(){return new Date(Date.now()+9*3600e3).toISOString().slice(0,10);}
+function dailyCourse(day=jstDay()){const c=genCourse(hashStr('kanrin-daily-'+day));c.day=day;c.fixed=true;return c;}
+const dayLabel=d=>`${+d.slice(5,7)}月${+d.slice(8,10)}日`;
+// 記録は日ごとに保存（直近14日分だけ残す）
+const TA_KEY='kanrin-ta-daily-v1';
+function loadAllTA(){try{const v=JSON.parse(store.get(TA_KEY)||'{}');return v&&typeof v==='object'&&!Array.isArray(v)?v:{};}catch(e){return{};}}
+function loadTA(day=S.course&&S.course.day){const v=loadAllTA()[day];return Array.isArray(v)?v:[];}
+function saveTA(list,day=S.course&&S.course.day){const all=loadAllTA();all[day]=list.slice(0,10);
+  const keep=Object.keys(all).sort().slice(-14);store.set(TA_KEY,JSON.stringify(Object.fromEntries(keep.map(k=>[k,all[k]]))));}
 
 /* ---------- プレイヤー設定 ---------- */
 function setupPlayers(keep){
@@ -672,7 +667,7 @@ function enterThink(){
   drawOverview();
   S.thinkEnd=isTA()?Infinity:performance.now()+S.think*1000;
   $('thinkPanel').hidden=isTA();
-  if(isTA()){const b=loadTA()[0];$('courseInfo').textContent=`タイムアタック固定コース ・ 全長 ${Math.round(c.finishX/10)}m`+(b?` ・ 自己ベスト ${b.t.toFixed(2)}秒`:'');}
+  if(isTA()){const b=loadTA()[0];$('courseInfo').textContent=`今日のコース（${dayLabel(c.day)}） ・ 全長 ${Math.round(c.finishX/10)}m`+(b?` ・ 自己ベスト ${b.t.toFixed(2)}秒`:'');}
   $('thinkNote').textContent=S.online
     ?'全員が決定するか時間切れでレース開始。時間切れのときは入力中の字で走る。'
     :`全員が決定するか時間切れでレース開始。時間切れのときは入力中の字で走る。CPU×${4-S.mode}も同時に考えている。`;
@@ -1136,6 +1131,7 @@ segSetup($('speedSeg'),v=>S.speed=+v);
 function resRow(r,rank){const cell=k=>r.tt[k]>0.05?r.tt[k].toFixed(1):'-';
   return `<tr><td class="rank">${rank}</td><td><span class="dot" style="--c:${r.color}"></span>${esc(r.name)}</td><td class="k">${esc(r.rearCh)}</td><td class="k">${esc(r.frontCh)}</td><td>${FRAMES[r.frame].name}・${SIZES[r.size].name}</td><td>${r.done?r.time.toFixed(2)+'秒':'-'}</td>${TK.map(k=>`<td>${cell(k)}</td>`).join('')}</tr>`;}
 function showTA(r){
+  $('taDay').textContent=`${dayLabel(S.course.day)}のコースの記録です。この端末のブラウザに保存されます。`;
   const prev=loadTA();const best=prev[0];
   const rec={t:+r.time.toFixed(3),c:r.color,fr:r.frame,sz:r.size,r:r.rearCh,f:r.frontCh,a:TK.map(k=>r.a[k]),acc:r.acc,tt:TK.map(k=>+r.tt[k].toFixed(1)),at:Date.now()};
   const same=prev.find(p=>p.r===rec.r&&p.f===rec.f&&p.fr===rec.fr&&p.sz===rec.sz&&Math.abs(p.t-rec.t)<0.001);
