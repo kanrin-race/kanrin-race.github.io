@@ -86,6 +86,16 @@ canvas{max-width:100%}
 .bar .track i{display:block;height:100%;border-radius:5px}
 .bar b{text-align:right;font-variant-numeric:tabular-nums}
 .raw{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.vis{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:start;border-top:1px solid var(--line);padding-top:12px}
+.viscv{width:150px;height:150px;display:block;background:#0f1426;border-radius:10px}
+.visside{display:flex;flex-direction:column;gap:8px;min-width:0}
+.feats{display:grid;grid-template-columns:repeat(auto-fill,minmax(6.8em,1fr));gap:4px}
+.feat{font:inherit;font-size:12px;text-align:left;background:var(--bg);color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:4px 8px;cursor:pointer;display:flex;justify-content:space-between;gap:6px}
+.feat b{color:var(--text);font-variant-numeric:tabular-nums}
+.feat[aria-pressed="true"]{border-color:var(--accent);color:var(--text);box-shadow:inset 3px 0 0 var(--accent)}
+.fexp{font-size:12px;color:var(--text);line-height:1.5}
+.fexp span{color:var(--muted)}
+@media (max-width:460px){.vis{grid-template-columns:1fr}.viscv{width:100%;height:auto;aspect-ratio:1;max-width:220px}}
 .stage{position:relative}
 #race{width:100%;height:min(64vh,540px);display:block;border-radius:14px;background:#9fd3ea}
 #progress{width:100%;height:40px;display:block}
@@ -149,6 +159,8 @@ td.k{font-weight:900;font-size:22px}
       <li><b>穴</b>：閉じたすき間の数（口=1、田=4）。ぬかるみで泥を逃がす溝になる。</li>
       <li><b>重さ</b>：黒い部分が多いほど重い。下り坂では有利、上り坂と水中では不利。</li>
       <li>後輪60%・前輪40%で合算し、車体と車輪サイズの補正をかける。</li>
+      <li>どの字も7地形の能力の合計は同じ。得意な地形が多い字ほど、その分ほかの地形が苦手になる。</li>
+      <li>字を入れると「判定を見る」で、何を数えたかを字の上に重ねて確認できる。</li>
     </ul>
   </details>
 </section>
@@ -316,7 +328,7 @@ async function analyze(ch){
   let m=0;for(const v of prof)m+=v;m/=NP;
   let sd=0;for(const v of prof)sd+=(v-m)**2;sd=Math.sqrt(sd/NP);
   const cv=sd/m;
-  let peaks=0;
+  let peaks=0;const peakIdx=[];
   for(let i=0;i<NP;i++){
     const v=prof[i];let isMax=true,lo=v;
     for(let k=1;k<=9;k++){
@@ -324,23 +336,23 @@ async function analyze(ch){
       if(k<=3&&(a>v||b>=v))isMax=false;
       lo=Math.min(lo,a,b);
     }
-    if(isMax&&v-lo>0.07){peaks++;i+=3;}
+    if(isMax&&v-lo>0.07){peaks++;peakIdx.push(i);i+=3;}
   }
   let gap=0;for(const v of prof)if(v<0.3)gap++;gap/=NP;
   // 主軸（細長さ）
   const mx=sx/cnt,my=sy/cnt;let cxx=0,cyy=0,cxy=0;
   // 輪郭の長さと向き
-  let edge=0,eH=0,eV=0,eD=0;
+  let edge=0,eH=0,eV=0,eD=0;const emask=new Uint8Array(AS*AS);
   for(let y=0;y<AS;y++)for(let x=0;x<AS;x++){
     if(!ink[y*AS+x])continue;
     const dx=x-mx,dy=y-my;cxx+=dx*dx;cyy+=dy*dy;cxy+=dx*dy;
     if(I(x+1,y)&&I(x-1,y)&&I(x,y+1)&&I(x,y-1))continue;
-    edge++;
+    edge++;emask[y*AS+x]=1;
     const gx=(I(x+1,y-1)+2*I(x+1,y)+I(x+1,y+1))-(I(x-1,y-1)+2*I(x-1,y)+I(x-1,y+1));
     const gy=(I(x-1,y+1)+2*I(x,y+1)+I(x+1,y+1))-(I(x-1,y-1)+2*I(x,y-1)+I(x+1,y-1));
     if(!gx&&!gy)continue;
     const an=Math.atan2(Math.abs(gy),Math.abs(gx));
-    if(an<Math.PI/8)eV++;else if(an>Math.PI*3/8)eH++;else eD++;
+    if(an<Math.PI/8){eV++;emask[y*AS+x]=2;}else if(an>Math.PI*3/8)eH++;else eD++;
   }
   cxx/=cnt;cyy/=cnt;cxy/=cnt;
   const tr=cxx+cyy,det=cxx*cyy-cxy*cxy,disc=Math.sqrt(Math.max(0,tr*tr/4-det));
@@ -354,13 +366,15 @@ async function analyze(ch){
       for(const[nx,ny]of[[x+1,y],[x-1,y],[x,y+1],[x,y-1]]){if(nx<0||ny<0||nx>=AS||ny>=AS)continue;const k=ny*AS+nx;if(ink[k]||bg[k])continue;bg[k]=mark;stack.push(nx,ny);}}
     return n;};
   flood(0,0,1);
-  let holes=0;
-  for(let y=0;y<AS;y++)for(let x=0;x<AS;x++){const k=y*AS+x;if(!ink[k]&&!bg[k]){if(flood(x,y,2)>=10)holes++;}}
+  let holes=0;const holeIds=[];let mark=2;
+  for(let y=0;y<AS;y++)for(let x=0;x<AS;x++){const k=y*AS+x;if(!ink[k]&&!bg[k]){mark=Math.min(255,mark+1);if(flood(x,y,mark)>=10){holes++;holeIds.push(mark);}}}
   // 接地高さ（凸包のサポート関数）
   const sup=new Float32Array(NP);
   for(let j=0;j<NP;j++){let best=0;const aj=j/NP*TAU;for(let i=0;i<NP;i++){const v=prof[i]*Math.cos(i/NP*TAU-aj);if(v>best)best=v;}sup[j]=best;}
   const eAll=Math.max(1,eH+eV+eD);
-  const res={ch,prof,sup,rmax,offX:cx-AS/2,offY:cy-AS/2,holeCount:holes,
+  let ax=1,ay=0;if(Math.abs(cxy)>1e-6){ax=l1-cyy;ay=cxy;const n=Math.hypot(ax,ay);ax/=n;ay/=n;}else if(cyy>cxx){ax=0;ay=1;}
+  const vis={ink,emask,bg,holeIds,peakIdx,cx,cy,mx,my,ax,ay,l1,l2,fill,edge,vRatio:eV/Math.max(1,eH+eV+eD),cv};
+  const res={ch,prof,sup,rmax,offX:cx-AS/2,offY:cy-AS/2,holeCount:holes,vis,
     round:clamp(1.1-cv*2.6-gap*0.5),
     angular:clamp(Math.min(peaks,10)/8*0.6+clamp(cv*3)*0.4),
     stick:clamp(elong*0.85+clamp(0.45-fill)*0.8+Math.min(peaks,8)/8*0.15),
@@ -380,9 +394,12 @@ function baseApt(s){const w=s.weight;return{
   snow:0.25+0.8*s.vert+0.15*s.stick-0.15*w,
   bush:0.22+0.85*s.complex+0.1*s.angular,
   mud:0.25+0.75*s.holes+0.1*s.complex-0.1*w};}
+const APT_MEAN=0.72;
 function perf(s,frame,size){
   const b=baseApt(s),F=FRAMES[frame]||FRAMES.std,Z=SIZES[size]||SIZES.m,a={};
-  for(const k of TK)a[k]=+clamp(b[k]*(F.mul[k]||1)*(Z.mul[k]||1),0.12,1.45).toFixed(3);
+  // どの字も7地形の能力の合計（平均）が同じになるようにそろえる
+  const mean=TK.reduce((x,k)=>x+b[k],0)/TK.length,norm=APT_MEAN/Math.max(0.2,mean);
+  for(const k of TK)a[k]=+clamp(b[k]*norm*(F.mul[k]||1)*(Z.mul[k]||1),0.12,1.45).toFixed(3);
   const acc=+((2.2-1.2*s.weight)*(F.acc||1)*Z.acc).toFixed(3);
   return{a,acc};
 }
@@ -543,7 +560,7 @@ function fixedCourse(){
   add('flat',460,0);
   return{seed:20260927,segs,length:x,finishX:x-260,fixed:true};
 }
-const TA_KEY='kanrin-ta-v1';
+const TA_KEY='kanrin-ta-v2';
 function loadTA(){try{const v=JSON.parse(store.get(TA_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return[];}}
 function saveTA(list){store.set(TA_KEY,JSON.stringify(list.slice(0,10)));}
 
@@ -629,6 +646,14 @@ function buildCards(){
       <div class="err" id="err${i}" role="status"></div>
       <div class="bars" id="bars${i}"></div>
       <div class="raw" id="raw${i}"></div>
+      <div class="vis">
+        <canvas class="viscv" id="vis${i}" aria-label="字の判定の見える化"></canvas>
+        <div class="visside">
+          <div class="row" style="gap:8px"><span class="label">判定を見る</span><div class="seg small" id="visw${i}"><button data-v="r" aria-pressed="true">後輪</button><button data-v="f" aria-pressed="false">前輪</button></div></div>
+          <div class="feats" id="feats${i}"></div>
+          <p class="fexp" id="fexp${i}"></p>
+        </div>
+      </div>
       <button class="btn" id="lock${i}">この組み合わせで決定</button>`;
     box.appendChild(el);
     $('rear'+i).value=p.rearCh;$('front'+i).value=p.frontCh;
@@ -640,6 +665,10 @@ function buildCards(){
       pushChoice();});
     segSetup($('frame'+i),v=>{p.frame=v;$('fdesc'+i).textContent=FRAMES[v].desc;updatePlayer(i);});
     segSetup($('size'+i),v=>{p.size=v;updatePlayer(i);});
+    p.visW=p.visW||'r';p.visF=p.visF||'round';
+    for(const b of $('visw'+i).querySelectorAll('button'))b.setAttribute('aria-pressed',b.dataset.v===p.visW?'true':'false');
+    segSetup($('visw'+i),v=>{p.visW=v;renderVis(i);});
+    $('feats'+i).addEventListener('click',e=>{const b=e.target.closest('.feat');if(!b)return;p.visF=b.dataset.f;renderVis(i);});
     const onIn=()=>updatePlayer(i);
     $('rear'+i).addEventListener('input',onIn);$('front'+i).addEventListener('input',onIn);
     for(const id of['rear'+i,'front'+i])$(id).addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)toggleLock(i);});
@@ -665,9 +694,65 @@ async function updatePlayer(i){
     p.perf={a,acc};
     $('bars'+i).innerHTML=TK.map(k=>`<div class="bar"><span>${TYPES[k].name}</span><div class="track"><i style="width:${a[k]/1.45*100}%;background:${TYPES[k].color}"></i></div><b>${Math.round(a[k]*100)}</b></div>`).join('');
     const P=v=>Math.round(v*100);
-    $('raw'+i).textContent=`丸さ ${P(s.round)} ・ 角ばり ${P(s.angular)} ・ 棒っぽさ ${P(s.stick)} ・ 縦画 ${P(s.vert)} ・ 複雑さ ${P(s.complex)} ・ 穴 ${ra.holeCount}/${fa.holeCount}個 ・ 重さ ${P(s.weight)} ・ 加速 ${Math.round(acc*50)}`;
-  }else p.perf=null;
+    $('raw'+i).textContent=`どの字も7地形の能力の合計は同じ。得意な地形が多いコースで選ぶと速い。 加速 ${Math.round(acc*50)}`;
+  }else{p.perf=null;$('bars'+i).innerHTML='';$('raw'+i).textContent='';}
+  renderVis(i);
   pushChoice();
+}
+const FEATINFO={
+  round:{name:'丸さ',t:'平地',d:'白い線が字の外周、点線が円。外周が円に近いほど高い。'},
+  angular:{name:'角ばり',t:'上り坂・下り坂',d:'赤い点が見つかった「とがった角」。角が多く外周がでこぼこなほど高い。'},
+  stick:{name:'棒っぽさ',t:'水中',d:'黄色い十字は字の縦横の広がり。片方だけ長い（細長い）ほど、また黒い部分がスカスカなほど高い。'},
+  vert:{name:'縦画',t:'雪',d:'青い縁が縦向きの線、灰色はそれ以外。縁のうち縦向きの割合が多いほど高い。'},
+  complex:{name:'複雑さ',t:'茂み',d:'緑が線の縁。縁の総延長が長い（画数が多く細かい）ほど高い。'},
+  holes:{name:'穴',t:'ぬかるみ',d:'色で塗った部分が閉じたすき間。数が多いほど高い（5個で最大）。'},
+  weight:{name:'重さ',t:'下り坂で有利、上り坂・水中・雪で不利',d:'オレンジが黒い部分。字の大きさに対して黒い面積が多いほど重い。加速も遅くなる。'}
+};
+const HOLE_COL=[[255,111,97],[255,196,61],[122,214,110],[91,178,255],[196,132,255],[255,120,200],[80,220,210]];
+function renderVis(i){
+  const p=S.players[i];const cv=$('vis'+i);if(!cv)return;
+  const a=p.visW==='f'?p.front:p.rear;
+  const f=p.visF;
+  $('feats'+i).innerHTML=FEAT.map(k=>`<button class="feat" data-f="${k}" aria-pressed="${k===f}">${FEATINFO[k].name}<b>${a?(k==='holes'?a.holeCount+'個':Math.round(a[k]*100)):'-'}</b></button>`).join('');
+  const inf=FEATINFO[f];
+  $('fexp'+i).innerHTML=`<b>${inf.name}</b> <span>→ ${inf.t}</span><br>${inf.d}`;
+  const {ctx,w,h}=fitCanvas(cv);ctx.clearRect(0,0,w,h);
+  if(!a||!a.vis){ctx.fillStyle='#a9b1cf';ctx.font=`12px ${FF}`;ctx.textAlign='center';ctx.fillText('字を入れると表示',w/2,h/2);return;}
+  const V=a.vis;
+  const off=document.createElement('canvas');off.width=off.height=AS;const oc=off.getContext('2d');
+  const img=oc.createImageData(AS,AS),D=img.data;
+  const holeSet=new Map(V.holeIds.map((id,j)=>[id,HOLE_COL[j%HOLE_COL.length]]));
+  for(let k=0;k<AS*AS;k++){
+    let c=null;
+    if(V.ink[k]){c=[70,80,115];
+      if(f==='weight')c=[255,159,28];
+      else if(f==='vert'){const x=k%AS;let e=0;for(let d=-2;d<=2;d++){const xx=x+d;if(xx<0||xx>=AS)continue;const m=V.emask[k+d];if(m===2){e=2;break;}if(m&&!d)e=1;}
+        if(e===2)c=[80,170,255];else if(e===1)c=[150,156,180];}
+      else if(f==='complex'){const x=k%AS;if(V.emask[k]||(x>0&&V.emask[k-1])||(x<AS-1&&V.emask[k+1])||V.emask[k-AS]||V.emask[k+AS])c=[90,220,120];}
+      else if(f!=='vert'&&f!=='complex'&&f!=='weight')c=[200,204,220];}
+    else if(f==='holes'&&holeSet.has(V.bg[k]))c=holeSet.get(V.bg[k]);
+    if(c){D[k*4]=c[0];D[k*4+1]=c[1];D[k*4+2]=c[2];D[k*4+3]=255;}
+  }
+  oc.putImageData(img,0,0);
+  const sc=Math.min(w,h)/AS;
+  ctx.imageSmoothingEnabled=false;ctx.drawImage(off,0,0,AS*sc,AS*sc);
+  const X=x=>x*sc,Y=y=>y*sc;
+  ctx.lineWidth=2;
+  const P=(j)=>{const an=j/NP*TAU,r=a.prof[j]*a.rmax;return[X(V.cx+Math.cos(an)*r),Y(V.cy+Math.sin(an)*r)];};
+  if(f==='round'||f==='angular'){
+    ctx.strokeStyle=f==='round'?'#ffffff':'rgba(255,255,255,.55)';ctx.beginPath();
+    for(let j=0;j<=NP;j++){const [x,y]=P(j%NP);j?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();
+  }
+  if(f==='round'){let m=0;for(const v of a.prof)m+=v;m=m/NP*a.rmax;
+    ctx.setLineDash([4,4]);ctx.strokeStyle='#f2b705';ctx.beginPath();ctx.arc(X(V.cx),Y(V.cy),m*sc,0,TAU);ctx.stroke();ctx.setLineDash([]);}
+  if(f==='angular'){ctx.fillStyle='#ff5a5f';for(const j of V.peakIdx){const [x,y]=P(j);ctx.beginPath();ctx.arc(x,y,4,0,TAU);ctx.fill();}}
+  if(f==='stick'){
+    const L1=Math.sqrt(V.l1)*2,L2=Math.sqrt(V.l2)*2;ctx.strokeStyle='#f2b705';ctx.lineWidth=3;ctx.beginPath();
+    ctx.moveTo(X(V.mx-V.ax*L1),Y(V.my-V.ay*L1));ctx.lineTo(X(V.mx+V.ax*L1),Y(V.my+V.ay*L1));
+    ctx.moveTo(X(V.mx+V.ay*L2),Y(V.my-V.ax*L2));ctx.lineTo(X(V.mx-V.ay*L2),Y(V.my+V.ax*L2));ctx.stroke();}
+  if(f==='holes'){ctx.font=`700 11px ${FF}`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#141a2e';
+    const sums=new Map();for(let k=0;k<AS*AS;k++){const id=V.bg[k];if(holeSet.has(id)){const s=sums.get(id)||[0,0,0];s[0]+=k%AS;s[1]+=Math.floor(k/AS);s[2]++;sums.set(id,s);}}
+    let n=1;for(const id of V.holeIds){const s=sums.get(id);if(s)ctx.fillText(n,X(s[0]/s[2]),Y(s[1]/s[2]));n++;}}
 }
 function toggleLock(i){
   const p=S.players[i];
