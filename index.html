@@ -295,19 +295,96 @@ const AS=128,AF=92,NP=72;
 const acv=document.createElement('canvas');acv.width=acv.height=AS;
 const actx=acv.getContext('2d',{willReadFrequently:true});
 const cache=new Map();
+// 角度の表（端末ごとの三角関数の誤差が結果に出ないよう丸めておく）
+const RC=k=>Math.round(k*1e12)/1e12;
+const COS=Array.from({length:NP},(_,i)=>RC(Math.cos(i/NP*TAU))),SIN=Array.from({length:NP},(_,i)=>RC(Math.sin(i/NP*TAU)));
+/* 字の輪郭データ（Noto Sans JP 極太の漢字）。ブラウザに字を描かせると端末ごとに形が少しずつ変わるので、
+   輪郭をゲーム自身で塗りつぶして、どの端末でも同じ判定になるようにする */
+const GLY={ok:false,failed:false,map:null,st:null,stAt:null,fl:null,xs:null,ys:null,ptAt:null};
+const glyReady=(async()=>{
+  try{
+    const res=await fetch('kanji.bin');if(!res.ok)throw new Error(res.status);
+    const buf=new Uint8Array(await new Response(res.body.pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    const dv=new DataView(buf.buffer);
+    if(String.fromCharCode(buf[0],buf[1],buf[2],buf[3])!=='KNR2')throw new Error('bad');
+    const n=dv.getUint32(4,true),L=[1,2,3,4,5].map(k=>dv.getUint32(4+k*4,true));
+    let o=28;const seg=[];for(const l of L){seg.push([o,o+l]);o+=l;}
+    const reader=([a,b])=>{let p=a;return()=>{let v=0,sh=0,c;do{c=buf[p++];v+=(c&127)*2**sh;sh+=7;}while(c&128);return v;};};
+    const zz=v=>v%2?-(v+1)/2:v/2;
+    const rCP=reader(seg[0]),rST=reader(seg[1]),rX=reader(seg[3]),rY=reader(seg[4]);
+    const npt=L[2],map=new Map(),st=[],stAt=new Int32Array(n+1),ptAt=new Int32Array(n+1);
+    const fl=buf.subarray(seg[2][0],seg[2][1]),xs=new Int16Array(npt),ys=new Int16Array(npt);
+    let cp=0,pi=0;
+    for(let g=0;g<n;g++){
+      cp+=rCP();map.set(cp,g);stAt[g]=st.length;ptAt[g]=pi;
+      const nc=rST();st.push(nc);let px=0,py=0;
+      for(let c=0;c<nc;c++){const m=rST();st.push(m);for(let k=0;k<m;k++){px+=zz(rX());py+=zz(rY());xs[pi]=px;ys[pi]=py;pi++;}}
+    }
+    stAt[n]=st.length;ptAt[n]=pi;
+    Object.assign(GLY,{ok:true,map,st:Int32Array.from(st),stAt,fl,xs,ys,ptAt});
+  }catch(e){GLY.failed=true;console.warn('字の輪郭データを読めませんでした。ブラウザの描画で判定します',e);}
+})();
+// 輪郭を128×128に塗る（4×4のサンプルで半分以上かかった画素を字とみなす）
+function rasterGlyph(g){
+  const s=AF/1000,Q=2,ox=AS/2-500*s,oy=AS/2+380*s,SS=4;
+  const E=[];let si=GLY.stAt[g],pi=GLY.ptAt[g];const nc=GLY.st[si++];
+  for(let c=0;c<nc;c++){
+    const m=GLY.st[si++],P=[];
+    for(let k=0;k<m;k++,pi++)P.push([ox+GLY.xs[pi]*Q*s,oy-GLY.ys[pi]*Q*s,GLY.fl[pi]]);
+    let st0=P.findIndex(p=>p[2]);if(st0<0)continue;
+    const pts=[];for(let k=0;k<=m;k++)pts.push(P[(st0+k)%m]);
+    let cur=pts[0];
+    for(let k=1;k<pts.length;k++){
+      const p=pts[k];
+      if(p[2]){E.push([cur[0],cur[1],p[0],p[1]]);cur=p;}
+      else{const e=pts[k+1];let lx=cur[0],ly=cur[1];
+        for(let t=1;t<=8;t++){const u=t/8,v=1-u,x=v*v*cur[0]+2*v*u*p[0]+u*u*e[0],y=v*v*cur[1]+2*v*u*p[1]+u*u*e[1];E.push([lx,ly,x,y]);lx=x;ly=y;}
+        cur=e;k++;}
+    }
+  }
+  const cov=new Uint8Array(AS*AS),xs=[];
+  for(let sy=0;sy<AS*SS;sy++){
+    const y=(sy+0.5)/SS;xs.length=0;
+    for(const[x0,y0,x1,y1]of E){
+      if(y0===y1)continue;
+      const dn=y0<y1;const ya=dn?y0:y1,yb=dn?y1:y0;
+      if(y<ya||y>=yb)continue;
+      xs.push([x0+(y-y0)*(x1-x0)/(y1-y0),dn?1:-1]);
+    }
+    xs.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    let w=0;const row=Math.floor(sy/SS)*AS;
+    for(let k=0;k<xs.length-1;k++){
+      w+=xs[k][1];if(!w)continue;
+      const a=Math.max(0,Math.ceil(xs[k][0]*SS-0.5)),b=Math.min(AS*SS,Math.ceil(xs[k+1][0]*SS-0.5));
+      for(let sx=a;sx<b;sx++)cov[row+(sx>>2)]++;
+    }
+  }
+  const ink=new Uint8Array(AS*AS);for(let k=0;k<AS*AS;k++)ink[k]=cov[k]>=8?1:0;
+  return ink;
+}
+function inTable(ch){return !GLY.ok||GLY.map.has(ch.codePointAt(0));}
 async function analyze(ch){
   if(!ch)return null;
   if(cache.has(ch))return cache.get(ch);
-  try{await document.fonts.load(`900 ${AF}px "Noto Sans JP"`,ch);}catch(e){}
+  await glyReady;
   if(cache.has(ch))return cache.get(ch);
-  actx.clearRect(0,0,AS,AS);
-  actx.font=`900 ${AF}px ${FF}`;actx.textAlign='center';actx.textBaseline='middle';actx.fillStyle='#000';
-  actx.fillText(ch,AS/2,AS/2);
-  const d=actx.getImageData(0,0,AS,AS).data;
-  const ink=new Uint8Array(AS*AS);
+  let ink;
+  if(GLY.ok){
+    const g=GLY.map.get(ch.codePointAt(0));
+    if(g===undefined){cache.set(ch,null);return null;}
+    ink=rasterGlyph(g);
+  }else{
+    try{await document.fonts.load(`900 ${AF}px "Noto Sans JP"`,ch);}catch(e){}
+    if(cache.has(ch))return cache.get(ch);
+    actx.clearRect(0,0,AS,AS);
+    actx.font=`900 ${AF}px ${FF}`;actx.textAlign='center';actx.textBaseline='middle';actx.fillStyle='#000';
+    actx.fillText(ch,AS/2,AS/2);
+    const d=actx.getImageData(0,0,AS,AS).data;
+    ink=new Uint8Array(AS*AS);for(let k=0;k<AS*AS;k++)ink[k]=d[k*4+3]>=128?1:0;
+  }
   let minx=AS,miny=AS,maxx=-1,maxy=-1,cnt=0,sx=0,sy=0;
   for(let y=0;y<AS;y++)for(let x=0;x<AS;x++){
-    if(d[(y*AS+x)*4+3]>=128){ink[y*AS+x]=1;cnt++;sx+=x;sy+=y;if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;}
+    if(ink[y*AS+x]){cnt++;sx+=x;sy+=y;if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;}
   }
   if(cnt<30||maxx-minx<10&&maxy-miny<10){cache.set(ch,null);return null;}
   const cx=(minx+maxx)/2,cy=(miny+maxy)/2;
@@ -315,7 +392,7 @@ async function analyze(ch){
   // 放射プロフィール
   const prof=new Float32Array(NP);
   for(let i=0;i<NP;i++){
-    const a=i/NP*TAU,ca=Math.cos(a),sa=Math.sin(a);let last=0;
+    const ca=COS[i],sa=SIN[i];let last=0;
     for(let dd=0;dd<AS;dd+=0.5){
       const px=Math.round(cx+ca*dd),py=Math.round(cy+sa*dd);
       if(px<0||py<0||px>=AS||py>=AS)break;
@@ -326,7 +403,7 @@ async function analyze(ch){
   let rmax=1;for(const v of prof)rmax=Math.max(rmax,v);
   for(let i=0;i<NP;i++)prof[i]/=rmax;
   let m=0;for(const v of prof)m+=v;m/=NP;
-  let sd=0;for(const v of prof)sd+=(v-m)**2;sd=Math.sqrt(sd/NP);
+  let sd=0;for(const v of prof)sd+=(v-m)*(v-m);sd=Math.sqrt(sd/NP);
   const cv=sd/m;
   let peaks=0;const peakIdx=[];
   for(let i=0;i<NP;i++){
@@ -351,8 +428,8 @@ async function analyze(ch){
     const gx=(I(x+1,y-1)+2*I(x+1,y)+I(x+1,y+1))-(I(x-1,y-1)+2*I(x-1,y)+I(x-1,y+1));
     const gy=(I(x-1,y+1)+2*I(x,y+1)+I(x+1,y+1))-(I(x-1,y-1)+2*I(x,y-1)+I(x+1,y-1));
     if(!gx&&!gy)continue;
-    const an=Math.atan2(Math.abs(gy),Math.abs(gx));
-    if(an<Math.PI/8){eV++;emask[y*AS+x]=2;}else if(an>Math.PI*3/8)eH++;else eD++;
+    const ay=Math.abs(gy),ax=Math.abs(gx);// 22.5°と67.5°で分ける（tan=√2∓1）
+    if(ay<ax*(Math.SQRT2-1)){eV++;emask[y*AS+x]=2;}else if(ay>ax*(Math.SQRT2+1))eH++;else eD++;
   }
   cxx/=cnt;cyy/=cnt;cxy/=cnt;
   const tr=cxx+cyy,det=cxx*cyy-cxy*cxy,disc=Math.sqrt(Math.max(0,tr*tr/4-det));
@@ -370,7 +447,7 @@ async function analyze(ch){
   for(let y=0;y<AS;y++)for(let x=0;x<AS;x++){const k=y*AS+x;if(!ink[k]&&!bg[k]){mark=Math.min(255,mark+1);if(flood(x,y,mark)>=10){holes++;holeIds.push(mark);}}}
   // 接地高さ（凸包のサポート関数）
   const sup=new Float32Array(NP);
-  for(let j=0;j<NP;j++){let best=0;const aj=j/NP*TAU;for(let i=0;i<NP;i++){const v=prof[i]*Math.cos(i/NP*TAU-aj);if(v>best)best=v;}sup[j]=best;}
+  for(let j=0;j<NP;j++){let best=0;for(let i=0;i<NP;i++){const v=prof[i]*COS[(i-j+NP)%NP];if(v>best)best=v;}sup[j]=best;}
   const eAll=Math.max(1,eH+eV+eD);
   let ax=1,ay=0;if(Math.abs(cxy)>1e-6){ax=l1-cyy;ay=cxy;const n=Math.hypot(ax,ay);ax/=n;ay/=n;}else if(cyy>cxx){ax=0;ay=1;}
   const vis={ink,emask,bg,holeIds,peakIdx,cx,cy,mx,my,ax,ay,l1,l2,fill,edge,vRatio:eV/Math.max(1,eH+eV+eD),cv};
@@ -560,7 +637,7 @@ function fixedCourse(){
   add('flat',460,0);
   return{seed:20260927,segs,length:x,finishX:x-260,fixed:true};
 }
-const TA_KEY='kanrin-ta-v2';
+const TA_KEY='kanrin-ta-v3';
 function loadTA(){try{const v=JSON.parse(store.get(TA_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return[];}}
 function saveTA(list){store.set(TA_KEY,JSON.stringify(list.slice(0,10)));}
 
@@ -684,7 +761,7 @@ async function updatePlayer(i){
   if(p.rearCh!==rc||p.frontCh!==fc)return;
   p.rear=ra;p.front=fa;
   const err=[];
-  const why=ch=>isKanji(ch)?`「${ch}」は形が小さすぎて車輪にできません`:`「${ch}」は漢字ではありません。漢字1文字を入れてください`;
+  const why=ch=>!isKanji(ch)?`「${ch}」は漢字ではありません。漢字1文字を入れてください`:!inTable(ch)?`「${ch}」は珍しすぎてこのゲームの字の表にないので使えません`:`「${ch}」は形が小さすぎて車輪にできません`;
   if(!rc)err.push('後輪の字を入れてください');else if(!ra)err.push('後輪：'+why(rc));
   if(fc&&fc!==rc&&!fa)err.push('前輪：'+why(fc));
   $('err'+i).textContent=err.join('。');
@@ -1329,6 +1406,5 @@ document.fonts.ready.then(()=>{if(S.screen==='think')drawOverview();});
 POOL.forEach(ch=>analyze(ch));
 })();
 </script>
-
 </body>
 </html>
