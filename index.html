@@ -241,16 +241,16 @@ const TK=Object.keys(TYPES);
 const COLORS=['#ff5a5f','#3d7bff','#2bb673','#b06cff','#ff9f1c','#f4f1de','#19c3c3','#ff6ec7'];
 const FRAMES={
   std:{name:'スタンダード',desc:'補正なし。どこでも平均的。',mul:{}},
-  racer:{name:'レーサー',desc:'平地と下りが速い。雪・茂み・ぬかるみは苦手。',mul:{flat:1.12,down:1.08,up:.95,water:.94,snow:.88,bush:.88,mud:.85}},
-  off:{name:'オフロード',desc:'ぬかるみと茂みに強く、坂もこなす。平地は遅め。',mul:{flat:.9,down:.96,up:1.05,water:.95,snow:1.04,bush:1.12,mud:1.18}},
-  boat:{name:'ボート',desc:'水中がとても速い。坂は苦手。',mul:{water:1.25,flat:.95,up:.86,down:.94,snow:.95,mud:.95}},
-  snow:{name:'スノー',desc:'ソリ付き。雪道と下りが速い。水は苦手。',mul:{snow:1.25,down:1.05,flat:.97,water:.84,mud:.92,bush:.96}},
-  heavy:{name:'ヘビー',desc:'重くて加速が遅いが、下りと茂みで押し切る。',mul:{down:1.14,bush:1.1,mud:1.02,up:.86,water:.9,flat:.98},acc:.8}
+  racer:{name:'レーサー',desc:'平地と下りが速い。雪・茂み・ぬかるみは苦手。',mul:{flat:1.155,down:1.114,up:1.013,water:0.962,snow:0.912,bush:0.912,mud:0.891}},
+  off:{name:'オフロード',desc:'ぬかるみと茂みに強く、坂もこなす。平地は遅め。',mul:{flat:0.898,down:0.948,up:1.038,water:0.948,snow:1.038,bush:1.097,mud:1.137}},
+  boat:{name:'ボート',desc:'水中がとても速い。坂は苦手。',mul:{water:1.278,flat:0.968,up:0.878,down:0.948,snow:0.968,mud:0.968,bush:0.998}},
+  snow:{name:'スノー',desc:'ソリ付き。雪道と下りが速い。水は苦手。',mul:{snow:1.273,down:1.061,flat:0.98,water:0.859,mud:0.94,bush:0.97,up:1.01}},
+  heavy:{name:'ヘビー',desc:'重くて加速が遅いが、下りと茂みで押し切る。',mul:{down:1.138,bush:1.098,mud:1.038,up:0.859,water:0.898,flat:0.978,snow:0.998},acc:.8}
 };
 const SIZES={
-  s:{name:'小',r:14,acc:1.35,mul:{flat:.98,up:.98,down:.97,water:.97,snow:.95,bush:.9,mud:.9}},
+  s:{name:'小',r:14,acc:1.35,mul:{flat:1.067,up:1.067,down:1.037,water:1.006,snow:0.946,bush:0.925,mud:0.925}},
   m:{name:'中',r:17,acc:1,mul:{}},
-  l:{name:'大',r:20,acc:.78,mul:{flat:1.03,up:1.02,snow:1.08,bush:1.1,mud:1.1}}
+  l:{name:'大',r:20,acc:.78,mul:{flat:0.927,up:0.937,down:0.966,water:0.986,snow:1.045,bush:1.065,mud:1.065}}
 };
 const BASE=240, WB=54, BAND=44;
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
@@ -641,7 +641,7 @@ function fixedCourse(){
   add('flat',460,0);
   return{seed:20260927,segs,length:x,finishX:x-260,fixed:true};
 }
-const TA_KEY='kanrin-ta-v3';
+const TA_KEY='kanrin-ta-v4';
 function loadTA(){try{const v=JSON.parse(store.get(TA_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return[];}}
 function saveTA(list){store.set(TA_KEY,JSON.stringify(list.slice(0,10)));}
 
@@ -723,7 +723,7 @@ function buildCards(){
       </div>
       <div class="opt"><span class="label">車体</span><div class="seg small" id="frame${i}">${Object.entries(FRAMES).map(([k,f])=>`<button data-v="${k}" aria-pressed="${k===p.frame}">${f.name}</button>`).join('')}</div></div>
       <p class="fdesc" id="fdesc${i}"></p>
-      <div class="opt"><span class="label">車輪サイズ</span><div class="seg small" id="size${i}">${Object.entries(SIZES).map(([k,z])=>`<button data-v="${k}" aria-pressed="${k===p.size}">${z.name}</button>`).join('')}</div><span class="fdesc">大きいほど悪路に強く加速が遅い</span></div>
+      <div class="opt"><span class="label">車輪サイズ</span><div class="seg small" id="size${i}">${Object.entries(SIZES).map(([k,z])=>`<button data-v="${k}" aria-pressed="${k===p.size}">${z.name}</button>`).join('')}</div><span class="fdesc">小は平地・上りと加速に強く悪路に弱い。大はその逆</span></div>
       <div class="err" id="err${i}" role="status"></div>
       <div class="bars" id="bars${i}"></div>
       <div class="raw" id="raw${i}"></div>
