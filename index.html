@@ -262,12 +262,19 @@ function hashStr(s){let h=2166136261;for(const c of String(s)){h^=c.codePointAt(
 /* ---------- コース ---------- */
 function genCourse(seed){
   const r=rng(seed);
-  // コースごとに地形の出やすさを無作為に決め、それに従って区間を並べる（毎回ちがう偏りが自然に出る）。
+  // 5本に1本は「バランス型」：全地形を最低1回ずつ入れて残りを足す（どの地形も満遍なく出る）
+  const balanced=r()<0.2;
+  // それ以外はコースごとに地形の出やすさを無作為に決め、それに従って区間を並べる（毎回ちがう偏りが自然に出る）。
   // 端末で結果が変わらないよう、重みは掛け算だけで作る（一様乱数の3乗）
   const T=['flat','up','down','water','snow','bush','mud'];
   const w=T.map(()=>{const u=r();return u*u*u;}),sw=w.reduce((a,b)=>a+b,0);
   const n=13+Math.floor(r()*4);let list;
-  for(let tries=0;;tries++){
+  if(balanced){
+    list=['flat','flat','up','down','water','snow','bush','mud'];
+    const extra=['flat','up','up','down','water','snow','bush','mud'];
+    while(list.length<n)list.push(extra[Math.floor(r()*extra.length)]);
+    for(let i=list.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[list[i],list[j]]=[list[j],list[i]];}
+  }else for(let tries=0;;tries++){
     list=[];for(let i=0;i<n;i++){let u=r()*sw,k=0;while(k<T.length-1&&u>w[k]){u-=w[k];k++;}list.push(T[k]);}
     if(new Set(list).size>=3||tries>20)break;
   }
@@ -284,7 +291,7 @@ function genCourse(seed){
     else add(t,len,0);
   }
   add('flat',460,0);
-  return{seed,segs,length:x,finishX:x-260};
+  return{seed,segs,length:x,finishX:x-260,balanced};
 }
 function segAt(c,x){const s=c.segs;for(const g of s)if(x<g.x1)return g;return s[s.length-1];}
 function groundY(c,x){
@@ -635,10 +642,11 @@ $('goBtn').onclick=()=>{S.course=S.mode===3?dailyCourse():genCourse((Math.random
 const isTA=()=>S.mode===3&&!S.online;
 // 日本時間の日付から今日のコースを作る（同じ日なら全員同じコース）
 function jstDay(){return new Date(Date.now()+9*3600e3).toISOString().slice(0,10);}
-function dailyCourse(day=jstDay()){const c=genCourse(hashStr('kanrin-daily-'+day));c.day=day;c.fixed=true;return c;}
+function dailyCourse(day=jstDay()){const c=genCourse((rng(hashStr('kanrin-daily-'+day))()*4294967296)|0);// 似た日付で似たコースにならないよう乱数で一度かき混ぜる
+c.day=day;c.fixed=true;return c;}
 const dayLabel=d=>`${+d.slice(5,7)}月${+d.slice(8,10)}日`;
 // 記録は日ごとに保存（直近14日分だけ残す）
-const TA_KEY='kanrin-ta-daily-v2';
+const TA_KEY='kanrin-ta-daily-v3';
 function loadAllTA(){try{const v=JSON.parse(store.get(TA_KEY)||'{}');return v&&typeof v==='object'&&!Array.isArray(v)?v:{};}catch(e){return{};}}
 function loadTA(day=S.course&&S.course.day){const v=loadAllTA()[day];return Array.isArray(v)?v:[];}
 function saveTA(list,day=S.course&&S.course.day){const all=loadAllTA();all[day]=list.slice(0,10);
@@ -665,13 +673,13 @@ function enterThink(){
   show('think');
   const c=S.course;
   const tot={};for(const k of TK)tot[k]=0;for(const g of c.segs)tot[g.type]+=g.x1-g.x0;
-  $('courseInfo').textContent=`全長 ${Math.round(c.finishX/10)}m ・ コース番号 ${(c.seed>>>0).toString(36).toUpperCase()}`;
+  $('courseInfo').textContent=`${c.balanced?'バランス型 ・ ':''}全長 ${Math.round(c.finishX/10)}m ・ コース番号 ${(c.seed>>>0).toString(36).toUpperCase()}`;
   $('legend').innerHTML=TK.map(k=>`<span class="chip" style="--c:${TYPES[k].color}"><i></i>${TYPES[k].name} <b>${Math.round(tot[k]/c.length*100)}%</b><span class="muted">${TYPES[k].hint}</span></span>`).join('');
   buildCards();
   drawOverview();
   S.thinkEnd=isTA()?Infinity:performance.now()+S.think*1000;
   $('thinkPanel').hidden=isTA();
-  if(isTA()){const b=loadTA()[0];$('courseInfo').textContent=`今日のコース（${dayLabel(c.day)}） ・ 全長 ${Math.round(c.finishX/10)}m`+(b?` ・ 自己ベスト ${b.t.toFixed(2)}秒`:'');}
+  if(isTA()){const b=loadTA()[0];$('courseInfo').textContent=`今日のコース（${dayLabel(c.day)}） ・ ${c.balanced?'バランス型 ・ ':''}全長 ${Math.round(c.finishX/10)}m`+(b?` ・ 自己ベスト ${b.t.toFixed(2)}秒`:'');}
   $('thinkNote').textContent=S.online
     ?'全員が決定するか時間切れでレース開始。時間切れのときは入力中の字で走る。'
     :`全員が決定するか時間切れでレース開始。時間切れのときは入力中の字で走る。CPU×${4-S.mode}も同時に考えている。`;
