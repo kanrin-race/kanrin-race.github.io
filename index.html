@@ -248,7 +248,7 @@ const FRAMES={
   heavy:{name:'ヘビー',desc:'重くて加速が遅いが、下りと茂みで押し切る。',mul:{down:1.138,bush:1.098,mud:1.038,up:0.859,water:0.898,flat:0.978,snow:0.998},acc:.8}
 };
 const SIZES={
-  s:{name:'小',r:14,acc:1.35,mul:{flat:1.067,up:1.067,down:1.037,water:1.006,snow:0.946,bush:0.925,mud:0.925}},
+  s:{name:'小',r:14,acc:1.35,mul:{flat:1.056,up:1.056,down:1.027,water:0.996,snow:0.937,bush:0.916,mud:0.916}},
   m:{name:'中',r:17,acc:1,mul:{}},
   l:{name:'大',r:20,acc:.78,mul:{flat:0.927,up:0.937,down:0.966,water:0.986,snow:1.045,bush:1.065,mud:1.065}}
 };
@@ -262,11 +262,15 @@ function hashStr(s){let h=2166136261;for(const c of String(s)){h^=c.codePointAt(
 /* ---------- コース ---------- */
 function genCourse(seed){
   const r=rng(seed);
-  const n=13+Math.floor(r()*4);
-  const list=['flat','flat','up','down','water','snow','bush','mud'];
-  const extra=['flat','up','up','down','water','snow','bush','mud'];
-  while(list.length<n)list.push(extra[Math.floor(r()*extra.length)]);
-  for(let i=list.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[list[i],list[j]]=[list[j],list[i]];}
+  // コースごとに地形の出やすさを無作為に決め、それに従って区間を並べる（毎回ちがう偏りが自然に出る）。
+  // 端末で結果が変わらないよう、重みは掛け算だけで作る（一様乱数の3乗）
+  const T=['flat','up','down','water','snow','bush','mud'];
+  const w=T.map(()=>{const u=r();return u*u*u;}),sw=w.reduce((a,b)=>a+b,0);
+  const n=13+Math.floor(r()*4);let list;
+  for(let tries=0;;tries++){
+    list=[];for(let i=0;i<n;i++){let u=r()*sw,k=0;while(k<T.length-1&&u>w[k]){u-=w[k];k++;}list.push(T[k]);}
+    if(new Set(list).size>=3||tries>20)break;
+  }
   const segs=[];let x=0,h=0;
   const add=(type,len,dh,depth)=>{segs.push({type,x0:x,x1:x+len,h0:h,h1:h+dh,depth:depth||0});x+=len;h+=dh;};
   add('flat',420,0);
@@ -634,7 +638,7 @@ function jstDay(){return new Date(Date.now()+9*3600e3).toISOString().slice(0,10)
 function dailyCourse(day=jstDay()){const c=genCourse(hashStr('kanrin-daily-'+day));c.day=day;c.fixed=true;return c;}
 const dayLabel=d=>`${+d.slice(5,7)}月${+d.slice(8,10)}日`;
 // 記録は日ごとに保存（直近14日分だけ残す）
-const TA_KEY='kanrin-ta-daily-v1';
+const TA_KEY='kanrin-ta-daily-v2';
 function loadAllTA(){try{const v=JSON.parse(store.get(TA_KEY)||'{}');return v&&typeof v==='object'&&!Array.isArray(v)?v:{};}catch(e){return{};}}
 function loadTA(day=S.course&&S.course.day){const v=loadAllTA()[day];return Array.isArray(v)?v:[];}
 function saveTA(list,day=S.course&&S.course.day){const all=loadAllTA();all[day]=list.slice(0,10);
