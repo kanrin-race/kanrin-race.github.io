@@ -303,7 +303,7 @@ const COS=Array.from({length:NP},(_,i)=>RC(Math.cos(i/NP*TAU))),SIN=Array.from({
 const GLY={ok:false,failed:false,map:null,st:null,stAt:null,fl:null,xs:null,ys:null,ptAt:null};
 const glyReady=(async()=>{
   try{
-    const res=await fetch('kanji.bin');if(!res.ok)throw new Error(res.status);
+    const res=await fetch('kanji-outline.woff');// 中身は独自形式（配信できる拡張子に合わせて.woffにしている）if(!res.ok)throw new Error(res.status);
     const buf=new Uint8Array(await new Response(res.body.pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
     const dv=new DataView(buf.buffer);
     if(String.fromCharCode(buf[0],buf[1],buf[2],buf[3])!=='KNR2')throw new Error('bad');
