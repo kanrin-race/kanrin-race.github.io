@@ -300,10 +300,10 @@ const RC=k=>Math.round(k*1e12)/1e12;
 const COS=Array.from({length:NP},(_,i)=>RC(Math.cos(i/NP*TAU))),SIN=Array.from({length:NP},(_,i)=>RC(Math.sin(i/NP*TAU)));
 /* 字の輪郭データ（Noto Sans JP 極太の漢字）。ブラウザに字を描かせると端末ごとに形が少しずつ変わるので、
    輪郭をゲーム自身で塗りつぶして、どの端末でも同じ判定になるようにする */
-const GLY={ok:false,failed:false,map:null,st:null,stAt:null,fl:null,xs:null,ys:null,ptAt:null};
-const glyReady=(async()=>{
+// よく使う約1万4千字は最初に読み込み、中国語版・韓国語版にだけある約1万6千字は必要になったときに読み込む
+async function loadGly(url){
   try{
-    const res=await fetch('kanji-outline.woff');// 中身は独自形式（配信できる拡張子に合わせて.woffにしている）if(!res.ok)throw new Error(res.status);
+    const res=await fetch(url);if(!res.ok)throw new Error(res.status);// 中身は独自形式（配信できる拡張子に合わせて.woffにしている）
     const buf=new Uint8Array(await new Response(res.body.pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
     const dv=new DataView(buf.buffer);
     if(String.fromCharCode(buf[0],buf[1],buf[2],buf[3])!=='KNR2')throw new Error('bad');
@@ -321,16 +321,19 @@ const glyReady=(async()=>{
       for(let c=0;c<nc;c++){const m=rST();st.push(m);for(let k=0;k<m;k++){px+=zz(rX());py+=zz(rY());xs[pi]=px;ys[pi]=py;pi++;}}
     }
     stAt[n]=st.length;ptAt[n]=pi;
-    Object.assign(GLY,{ok:true,map,st:Int32Array.from(st),stAt,fl,xs,ys,ptAt});
-  }catch(e){GLY.failed=true;console.warn('字の輪郭データを読めませんでした。ブラウザの描画で判定します',e);}
-})();
+    return{ok:true,map,st:Int32Array.from(st),stAt,fl,xs,ys,ptAt};
+  }catch(e){console.warn('字の輪郭データを読めませんでした',url,e);return{ok:false,map:new Map()};}
+}
+const GLY={ok:false,map:new Map()};let GLY2=null,gly2P=null;
+const glyReady=loadGly('kanji-outline.woff').then(g=>{Object.assign(GLY,g);if(!g.ok)console.warn('ブラウザの描画で判定します');});
+const loadExtra=()=>gly2P||(gly2P=loadGly('kanji-outline2.woff').then(g=>{GLY2=g;if(!g.ok)gly2P=null;return g;}));
 // 輪郭を128×128に塗る（4×4のサンプルで半分以上かかった画素を字とみなす）
-function rasterGlyph(g){
+function rasterGlyph(G,g){
   const s=AF/1000,Q=2,ox=AS/2-500*s,oy=AS/2+380*s,SS=4;
-  const E=[];let si=GLY.stAt[g],pi=GLY.ptAt[g];const nc=GLY.st[si++];
+  const E=[];let si=G.stAt[g],pi=G.ptAt[g];const nc=G.st[si++];
   for(let c=0;c<nc;c++){
-    const m=GLY.st[si++],P=[];
-    for(let k=0;k<m;k++,pi++)P.push([ox+GLY.xs[pi]*Q*s,oy-GLY.ys[pi]*Q*s,GLY.fl[pi]]);
+    const m=G.st[si++],P=[];
+    for(let k=0;k<m;k++,pi++)P.push([ox+G.xs[pi]*Q*s,oy-G.ys[pi]*Q*s,G.fl[pi]]);
     let st0=P.findIndex(p=>p[2]);if(st0<0)continue;
     const pts=[];for(let k=0;k<=m;k++)pts.push(P[(st0+k)%m]);
     let cur=pts[0];
@@ -362,7 +365,7 @@ function rasterGlyph(g){
   const ink=new Uint8Array(AS*AS);for(let k=0;k<AS*AS;k++)ink[k]=cov[k]>=8?1:0;
   return ink;
 }
-function inTable(ch){return !GLY.ok||GLY.map.has(ch.codePointAt(0));}
+function inTable(ch){const c=ch.codePointAt(0);return !GLY.ok||GLY.map.has(c)||!GLY2||!GLY2.ok||GLY2.map.has(c);}
 async function analyze(ch){
   if(!ch)return null;
   if(cache.has(ch))return cache.get(ch);
@@ -370,9 +373,10 @@ async function analyze(ch){
   if(cache.has(ch))return cache.get(ch);
   let ink;
   if(GLY.ok){
-    const g=GLY.map.get(ch.codePointAt(0));
-    if(g===undefined){cache.set(ch,null);return null;}
-    ink=rasterGlyph(g);
+    const c=ch.codePointAt(0);let G=GLY,g=GLY.map.get(c);
+    if(g===undefined&&isKanji(ch)){G=await loadExtra();g=G.map.get(c);if(cache.has(ch))return cache.get(ch);}
+    if(g===undefined){if(G.ok)cache.set(ch,null);return null;}
+    ink=rasterGlyph(G,g);
   }else{
     try{await document.fonts.load(`900 ${AF}px "Noto Sans JP"`,ch);}catch(e){}
     if(cache.has(ch))return cache.get(ch);
@@ -761,7 +765,7 @@ async function updatePlayer(i){
   if(p.rearCh!==rc||p.frontCh!==fc)return;
   p.rear=ra;p.front=fa;
   const err=[];
-  const why=ch=>!isKanji(ch)?`「${ch}」は漢字ではありません。漢字1文字を入れてください`:!inTable(ch)?`「${ch}」は珍しすぎてこのゲームの字の表にないので使えません`:`「${ch}」は形が小さすぎて車輪にできません`;
+  const why=ch=>!isKanji(ch)?`「${ch}」は漢字ではありません。漢字1文字を入れてください`:!inTable(ch)?`「${ch}」は珍しすぎてこのゲームの字の表にないので使えません`:GLY.ok&&!GLY.map.has(ch.codePointAt(0))&&!(GLY2&&GLY2.ok)?`「${ch}」の字のデータを読み込めませんでした。通信を確かめてもう一度入れてください`:`「${ch}」は形が小さすぎて車輪にできません`;
   if(!rc)err.push('後輪の字を入れてください');else if(!ra)err.push('後輪：'+why(rc));
   if(fc&&fc!==rc&&!fa)err.push('前輪：'+why(fc));
   $('err'+i).textContent=err.join('。');
