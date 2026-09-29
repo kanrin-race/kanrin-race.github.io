@@ -137,7 +137,7 @@ td.k{font-weight:900;font-size:22px}
     <div class="row"><span class="label lbl">遊び方</span>
       <div class="seg" id="modeSeg"><button data-v="1" aria-pressed="true">1人（CPU×3）</button><button data-v="2" aria-pressed="false">2人（同じ画面）</button><button data-v="0" aria-pressed="false">オンライン対戦</button><button data-v="3" aria-pressed="false">タイムアタック</button></div></div>
     <div id="localOpts" class="scr" style="gap:12px">
-      <p class="muted" id="taNote" hidden>日替わりの「今日のコース」を1人で走ります。コースは日本時間の0時に変わり、その日は誰が遊んでも同じコースです。揺らぎなしで毎回同じ結果になるので、組み合わせを詰めて自己ベストを狙えます。</p>
+      <p class="muted" id="taNote" hidden>日替わりの「今日のコース」を1人で走ります。コースは日本時間の0時に変わり、その日は誰が遊んでも同じコースです。揺らぎなしで毎回同じ結果になるので、組み合わせを詰めて自己ベストを狙えます。走るときの影（ゴースト）は、その日の全国1位の走りです。</p>
       <div class="row" id="thinkRow"><span class="label lbl">考える時間</span>
         <span>90秒</span></div>
       <div class="row"><button class="btn primary" id="goBtn">コースを生成してスタート</button></div>
@@ -666,19 +666,26 @@ function exactTime(c,a,acc){// レース本番（1/120秒刻み・揺らぎな�
 async function rankReq(path,opt={}){
   const res=await fetch(RANK.url.replace(/\/$/,'')+'/rest/v1/'+path,{...opt,headers:{apikey:RANK.key,'Content-Type':'application/json',...(opt.headers||{})}});
   return res;}
+// ランキングを取得して、各記録のタイムを計算し直す（同じ日のものは30秒だけ使い回す）
+async function fetchRank(day){
+  if(S.rankCache&&S.rankCache.day===day&&performance.now()-S.rankCache.at<30000)return S.rankCache;
+  const res=await rankReq(`ta_scores?select=name,rear,front,frame,size&day=eq.${day}&ver=eq.${RANK_VER}&order=created_at.asc&limit=2000`);
+  if(!res.ok)throw new Error(res.status);
+  const rows=await res.json(),c=dailyCourse(day),best=new Map();
+  for(const r of rows){
+    if(!isKanji(r.rear)||!isKanji(r.front)||!FRAMES[r.frame]||!SIZES[r.size])continue;
+    const [ra,fa]=await Promise.all([analyze(r.rear),analyze(r.front)]);if(!ra||!fa)continue;
+    const p=perf(mix(ra,fa),r.frame,r.size),t=exactTime(c,p.a,p.acc);
+    const k=String(r.name).slice(0,12),b=best.get(k);if(!b||t<b.t)best.set(k,{...r,name:k,t});
+  }
+  const list=[...best.values()].sort((a,b)=>a.t-b.t);
+  S.rankCache={day,at:performance.now(),list,count:best.size};return S.rankCache;
+}
 async function loadRank(day,tbl='rankTable',msg='rankMsg',top=50){
   $(msg).textContent='読み込み中…';
   try{
-    const res=await rankReq(`ta_scores?select=name,rear,front,frame,size&day=eq.${day}&ver=eq.${RANK_VER}&order=created_at.asc&limit=2000`);
-    if(!res.ok)throw new Error(res.status);
-    const rows=await res.json(),c=dailyCourse(day),best=new Map();
-    for(const r of rows){
-      if(!isKanji(r.rear)||!isKanji(r.front)||!FRAMES[r.frame]||!SIZES[r.size])continue;
-      const [ra,fa]=await Promise.all([analyze(r.rear),analyze(r.front)]);if(!ra||!fa)continue;
-      const p=perf(mix(ra,fa),r.frame,r.size),t=exactTime(c,p.a,p.acc);
-      const k=String(r.name).slice(0,12),b=best.get(k);if(!b||t<b.t)best.set(k,{...r,name:k,t});
-    }
-    const list=[...best.values()].sort((a,b)=>a.t-b.t).slice(0,top);
+    const R=await fetchRank(day),best={size:R.count};
+    const list=R.list.slice(0,top);
     $(tbl).innerHTML=list.length?`<thead><tr><th>順位</th><th>名前</th><th>後輪</th><th>前輪</th><th>車体</th><th>タイム</th></tr></thead><tbody>`+
       list.map((p,i)=>`<tr><td class="rank">${i+1}</td><td>${esc(p.name)}</td><td class="k">${esc(p.rear)}</td><td class="k">${esc(p.front)}</td><td>${FRAMES[p.frame].name}・${SIZES[p.size].name}</td><td>${p.t.toFixed(2)}秒</td></tr>`).join('')+'</tbody>':'';
     $(msg).textContent=list.length?`${best.size}人が参加中（上位${top}人まで表示）`:'まだ誰も載っていません。タイムアタックで走って、最初の記録を載せましょう。';
@@ -692,6 +699,7 @@ async function sendRank(){
   try{
     const res=await rankReq('ta_scores',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({day:S.course.day,ver:RANK_VER,name,rear:r.rearCh,front:r.frontCh,frame:r.frame,size:r.size})});
     if(!res.ok&&res.status!==409)throw new Error(res.status);
+    S.rankCache=null;
     await loadRank(S.course.day);
     $('rankMsg').textContent=(res.status===409?'この組み合わせはもう載っています。':'載せました！')+' '+$('rankMsg').textContent;
   }catch(e){$('rankMsg').textContent='送れませんでした。通信を確かめてください。';$('rankSend').disabled=false;}
@@ -964,7 +972,15 @@ async function startLocalRace(){
   await Promise.all(POOL.map(analyze));
   if(S.screen!=='starting')return;
   const specs=S.players.map(p=>specFromPlayer(p));
-  if(isTA()){const b=loadTA()[0];if(b)specs.push({n:'ベスト '+b.t.toFixed(2),c:b.c,fr:b.fr,sz:b.sz,r:b.r,f:b.f,a:b.a,acc:b.acc,h:0,g:1});}
+  if(isTA()){
+    // 影は今日の全国1位。ランキングが使えない・まだ誰もいないときは自己ベスト
+    let top=null;
+    if(rankOn())try{const R=await Promise.race([fetchRank(S.course.day),new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),5000))]);top=R.list[0]||null;}catch(e){}
+    if(S.screen!=='starting')return;
+    if(top){const [ra,fa]=await Promise.all([analyze(top.rear),analyze(top.front)]);const p=perf(mix(ra,fa),top.frame,top.size);
+      specs.push({n:`1位 ${top.name}`,c:'#f2b705',fr:top.frame,sz:top.size,r:top.rear,f:top.front,a:TK.map(k=>p.a[k]),acc:p.acc,h:0,g:1});}
+    else{const b=loadTA()[0];if(b)specs.push({n:'ベスト '+b.t.toFixed(2),c:b.c,fr:b.fr,sz:b.sz,r:b.r,f:b.f,a:b.a,acc:b.acc,h:0,g:1});}
+  }
   else specs.push(...cpuSpecs(4-specs.length,specs.map(s=>s.c),Math.random));
   beginRace(specs,'local'+Date.now());
 }
