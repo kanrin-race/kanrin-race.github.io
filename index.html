@@ -141,6 +141,7 @@ td.k{font-weight:900;font-size:22px}
       <div class="row" id="thinkRow"><span class="label lbl">考える時間</span>
         <span>90秒</span></div>
       <div class="row"><button class="btn primary" id="goBtn">コースを生成してスタート</button></div>
+      <div id="homeRank" class="scr" hidden><h2>今日の全国ランキング</h2><p class="muted" id="homeRankMsg"></p><div class="tablewrap"><table id="homeRankTable"></table></div></div>
     </div>
     <div id="onlineOpts" class="scr" style="gap:12px" hidden>
       <div class="row"><label class="label lbl" for="nick">ニックネーム</label><input id="nick" class="txt" maxlength="8" autocomplete="off"></div>
@@ -589,6 +590,7 @@ function show(name){
   S.screen=name;
   for(const id of['scrTitle','scrLobby','scrThink','scrRace','scrResult'])$(id).hidden=id!=='scr'+name[0].toUpperCase()+name.slice(1);
   window.scrollTo(0,0);
+  if(name==='title'&&S.mode===3&&!S.online&&rankOn())loadRank(jstDay(),'homeRankTable','homeRankMsg',10);
 }
 function segSetup(seg,cb){
   seg.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;
@@ -596,7 +598,7 @@ function segSetup(seg,cb){
 }
 
 /* ---------- タイトル ---------- */
-segSetup($('modeSeg'),v=>{S.mode=+v;$('localOpts').hidden=S.mode===0;$('onlineOpts').hidden=S.mode!==0;$('thinkRow').hidden=S.mode===3;$('taNote').hidden=S.mode!==3;$('goBtn').textContent=S.mode===3?'タイムアタック開始':'コースを生成してスタート';});
+segSetup($('modeSeg'),v=>{S.mode=+v;$('localOpts').hidden=S.mode===0;$('onlineOpts').hidden=S.mode!==0;$('thinkRow').hidden=S.mode===3;$('taNote').hidden=S.mode!==3;if(S.mode===3&&rankOn()){$('homeRank').hidden=false;loadRank(jstDay(),'homeRankTable','homeRankMsg',10);}else $('homeRank').hidden=true;$('goBtn').textContent=S.mode===3?'タイムアタック開始':'コースを生成してスタート';});
 $('nick').value=store.get('kanrin-nick')||'';
 const TIPS={
   flat:{ks:['口','田','回'],t:'四角くまとまった字は平地',d:'輪郭が円に近いほど平らな道で速い。口や田が得意',sp:75},
@@ -664,8 +666,8 @@ function exactTime(c,a,acc){// レース本番（1/120秒刻み・揺らぎな�
 async function rankReq(path,opt={}){
   const res=await fetch(RANK.url.replace(/\/$/,'')+'/rest/v1/'+path,{...opt,headers:{apikey:RANK.key,'Content-Type':'application/json',...(opt.headers||{})}});
   return res;}
-async function loadRank(day){
-  $('rankMsg').textContent='読み込み中…';
+async function loadRank(day,tbl='rankTable',msg='rankMsg',top=50){
+  $(msg).textContent='読み込み中…';
   try{
     const res=await rankReq(`ta_scores?select=name,rear,front,frame,size&day=eq.${day}&ver=eq.${RANK_VER}&order=created_at.asc&limit=2000`);
     if(!res.ok)throw new Error(res.status);
@@ -676,11 +678,11 @@ async function loadRank(day){
       const p=perf(mix(ra,fa),r.frame,r.size),t=exactTime(c,p.a,p.acc);
       const k=String(r.name).slice(0,12),b=best.get(k);if(!b||t<b.t)best.set(k,{...r,name:k,t});
     }
-    const list=[...best.values()].sort((a,b)=>a.t-b.t).slice(0,50);
-    $('rankTable').innerHTML=list.length?`<thead><tr><th>順位</th><th>名前</th><th>後輪</th><th>前輪</th><th>車体</th><th>タイム</th></tr></thead><tbody>`+
+    const list=[...best.values()].sort((a,b)=>a.t-b.t).slice(0,top);
+    $(tbl).innerHTML=list.length?`<thead><tr><th>順位</th><th>名前</th><th>後輪</th><th>前輪</th><th>車体</th><th>タイム</th></tr></thead><tbody>`+
       list.map((p,i)=>`<tr><td class="rank">${i+1}</td><td>${esc(p.name)}</td><td class="k">${esc(p.rear)}</td><td class="k">${esc(p.front)}</td><td>${FRAMES[p.frame].name}・${SIZES[p.size].name}</td><td>${p.t.toFixed(2)}秒</td></tr>`).join('')+'</tbody>':'';
-    $('rankMsg').textContent=list.length?`${best.size}人が参加中（上位50人まで表示）`:'まだ誰も載っていません。';
-  }catch(e){$('rankTable').innerHTML='';$('rankMsg').textContent='ランキングを読み込めませんでした。通信を確かめてください。';}
+    $(msg).textContent=list.length?`${best.size}人が参加中（上位${top}人まで表示）`:'まだ誰も載っていません。タイムアタックで走って、最初の記録を載せましょう。';
+  }catch(e){$(tbl).innerHTML='';$(msg).textContent='ランキングを読み込めませんでした。通信を確かめてください。';}
 }
 async function sendRank(){
   const r=S.lastTA;if(!r)return;
