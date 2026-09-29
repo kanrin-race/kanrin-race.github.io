@@ -654,7 +654,7 @@ const TA_KEY='kanrin-ta-daily-v4';
 /* ---------- 全国ランキング（Supabase） ----------
    送るのは日付・名前・字・車体・車輪だけ。タイムは見る側で計算し直す（結果はどの端末でも同じ）。
    バランスを変えたら RANK_VER を上げると、ランキングも新しくなる */
-const RANK={url:'',key:''},RANK_VER=1;
+const RANK={url:'https://xhewzfwobqiehdqkqlsm.supabase.co',key:'sb_publishable_qk8mygx9zUfpd97AtLTSYA_yfQU2kk_'},RANK_VER=1;// 公開用（publishable）キー
 const rankOn=()=>!!(RANK.url&&RANK.key);
 function exactTime(c,a,acc){// レース本番（1/120秒刻み・揺らぎなし）と同じ計算
   let t=0,x=0,v=0;const H=1/120;
@@ -662,7 +662,7 @@ function exactTime(c,a,acc){// レース本番（1/120秒刻み・揺らぎな�
     if(nx>=c.finishX)return t-H*(nx-c.finishX)/(nx-x);x=nx;}
   return Infinity;}
 async function rankReq(path,opt={}){
-  const res=await fetch(RANK.url.replace(/\/$/,'')+'/rest/v1/'+path,{...opt,headers:{apikey:RANK.key,Authorization:'Bearer '+RANK.key,'Content-Type':'application/json',...(opt.headers||{})}});
+  const res=await fetch(RANK.url.replace(/\/$/,'')+'/rest/v1/'+path,{...opt,headers:{apikey:RANK.key,'Content-Type':'application/json',...(opt.headers||{})}});
   return res;}
 async function loadRank(day){
   $('rankMsg').textContent='読み込み中…';
