@@ -240,12 +240,12 @@ const TYPES={
 const TK=Object.keys(TYPES);
 const COLORS=['#ff5a5f','#3d7bff','#2bb673','#b06cff','#ff9f1c','#f4f1de','#19c3c3','#ff6ec7'];
 const FRAMES={
-  std:{name:'スタンダード',desc:'補正なし。どこでも平均的。',mul:{}},
+  std:{name:'スタンダード',desc:'得意も苦手もなく、どこでも少しだけ速い。',mul:{flat:1.02,up:1.02,down:1.02,water:1.02,snow:1.02,bush:1.02,mud:1.02}},
   racer:{name:'レーサー',desc:'平地と下りが速い。雪・茂み・ぬかるみは苦手。',mul:{flat:1.155,down:1.114,up:1.013,water:0.962,snow:0.912,bush:0.912,mud:0.891}},
-  off:{name:'オフロード',desc:'ぬかるみと茂みに強く、坂もこなす。平地は遅め。',mul:{flat:0.898,down:0.948,up:1.038,water:0.948,snow:1.038,bush:1.097,mud:1.137}},
+  off:{name:'オフロード',desc:'ぬかるみと茂みに強く、坂もこなす。平地は遅め。',mul:{flat:0.911,down:0.962,up:1.054,water:0.962,snow:1.054,bush:1.113,mud:1.154}},
   boat:{name:'ボート',desc:'水中がとても速い。坂は苦手。',mul:{water:1.278,flat:0.968,up:0.878,down:0.948,snow:0.968,mud:0.968,bush:0.998}},
   snow:{name:'スノー',desc:'ソリ付き。雪道と下りが速い。水は苦手。',mul:{snow:1.273,down:1.061,flat:0.98,water:0.859,mud:0.94,bush:0.97,up:1.01}},
-  heavy:{name:'ヘビー',desc:'重くて加速が遅いが、下りと茂みで押し切る。',mul:{down:1.138,bush:1.098,mud:1.038,up:0.859,water:0.898,flat:0.978,snow:0.998},acc:.8}
+  heavy:{name:'ヘビー',desc:'重くて加速が遅いが、下りと茂みで押し切る。',mul:{down:1.161,bush:1.12,mud:1.059,up:0.876,water:0.916,flat:0.998,snow:1.018},acc:.8}
 };
 const SIZES={
   s:{name:'小',r:14,acc:1.35,mul:{flat:1.056,up:1.056,down:1.027,water:0.996,snow:0.937,bush:0.916,mud:0.916}},
@@ -646,7 +646,7 @@ function dailyCourse(day=jstDay()){const c=genCourse((rng(hashStr('kanrin-daily-
 c.day=day;c.fixed=true;return c;}
 const dayLabel=d=>`${+d.slice(5,7)}月${+d.slice(8,10)}日`;
 // 記録は日ごとに保存（直近14日分だけ残す）
-const TA_KEY='kanrin-ta-daily-v3';
+const TA_KEY='kanrin-ta-daily-v4';
 function loadAllTA(){try{const v=JSON.parse(store.get(TA_KEY)||'{}');return v&&typeof v==='object'&&!Array.isArray(v)?v:{};}catch(e){return{};}}
 function loadTA(day=S.course&&S.course.day){const v=loadAllTA()[day];return Array.isArray(v)?v:[];}
 function saveTA(list,day=S.course&&S.course.day){const all=loadAllTA();all[day]=list.slice(0,10);
