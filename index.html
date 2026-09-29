@@ -215,7 +215,11 @@ td.k{font-weight:900;font-size:22px}
   <h2>結果</h2>
   <p class="win" id="winLine"></p>
   <div class="tablewrap"><table id="resTable"></table></div>
-  <div class="scr" id="taBox" hidden><h2>今日の自己ベスト</h2><p class="muted" id="taDay">この端末のブラウザに保存されます。</p><div class="tablewrap"><table id="taTable"></table></div></div>
+  <div class="scr" id="taBox" hidden><h2>今日の自己ベスト</h2><p class="muted" id="taDay">この端末のブラウザに保存されます。</p><div class="tablewrap"><table id="taTable"></table></div>
+    <div id="rankBox" class="scr" hidden><h2>全国ランキング（今日）</h2>
+      <p class="muted">載せたいときだけ、名前と組み合わせを送ります。タイムは送られた組み合わせから各端末で計算し直すので、ズルはできません。</p>
+      <div class="row"><input id="rankName" class="txt" maxlength="12" autocomplete="off" placeholder="名前（12文字まで）"><button class="btn" id="rankSend">今回の記録を載せる</button></div>
+      <p class="muted" id="rankMsg"></p><div class="tablewrap"><table id="rankTable"></table></div></div></div>
   <div class="row" id="resLocal"><button class="btn primary" id="againBtn">同じコースで再戦</button><button class="btn" id="newBtn">新しいコース</button><button class="btn" id="titleBtn">タイトルへ</button></div>
   <div class="row" id="resHost" hidden><button class="btn primary" id="hAgainBtn">同じコースで次のレース</button><button class="btn" id="hNewBtn">新しいコースで次のレース</button><button class="btn" id="hLobbyBtn">部屋に戻る</button><button class="btn quit">部屋を出る</button></div>
   <div class="row" id="resGuest" hidden><span class="muted">ホストが次のレースを始めるのを待っています。</span><button class="btn quit">部屋を出る</button></div>
@@ -647,6 +651,49 @@ c.day=day;c.fixed=true;return c;}
 const dayLabel=d=>`${+d.slice(5,7)}月${+d.slice(8,10)}日`;
 // 記録は日ごとに保存（直近14日分だけ残す）
 const TA_KEY='kanrin-ta-daily-v4';
+/* ---------- 全国ランキング（Supabase） ----------
+   送るのは日付・名前・字・車体・車輪だけ。タイムは見る側で計算し直す（結果はどの端末でも同じ）。
+   バランスを変えたら RANK_VER を上げると、ランキングも新しくなる */
+const RANK={url:'',key:''},RANK_VER=1;
+const rankOn=()=>!!(RANK.url&&RANK.key);
+function exactTime(c,a,acc){// レース本番（1/120秒刻み・揺らぎなし）と同じ計算
+  let t=0,x=0,v=0;const H=1/120;
+  while(t<600){t+=H;const ty=segAt(c,x+WB/2).type;v+=(BASE*a[ty]-v)*clamp(acc*H,0,1);const nx=x+v*H;
+    if(nx>=c.finishX)return t-H*(nx-c.finishX)/(nx-x);x=nx;}
+  return Infinity;}
+async function rankReq(path,opt={}){
+  const res=await fetch(RANK.url.replace(/\/$/,'')+'/rest/v1/'+path,{...opt,headers:{apikey:RANK.key,Authorization:'Bearer '+RANK.key,'Content-Type':'application/json',...(opt.headers||{})}});
+  return res;}
+async function loadRank(day){
+  $('rankMsg').textContent='読み込み中…';
+  try{
+    const res=await rankReq(`ta_scores?select=name,rear,front,frame,size&day=eq.${day}&ver=eq.${RANK_VER}&order=created_at.asc&limit=2000`);
+    if(!res.ok)throw new Error(res.status);
+    const rows=await res.json(),c=dailyCourse(day),best=new Map();
+    for(const r of rows){
+      if(!isKanji(r.rear)||!isKanji(r.front)||!FRAMES[r.frame]||!SIZES[r.size])continue;
+      const [ra,fa]=await Promise.all([analyze(r.rear),analyze(r.front)]);if(!ra||!fa)continue;
+      const p=perf(mix(ra,fa),r.frame,r.size),t=exactTime(c,p.a,p.acc);
+      const k=String(r.name).slice(0,12),b=best.get(k);if(!b||t<b.t)best.set(k,{...r,name:k,t});
+    }
+    const list=[...best.values()].sort((a,b)=>a.t-b.t).slice(0,50);
+    $('rankTable').innerHTML=list.length?`<thead><tr><th>順位</th><th>名前</th><th>後輪</th><th>前輪</th><th>車体</th><th>タイム</th></tr></thead><tbody>`+
+      list.map((p,i)=>`<tr><td class="rank">${i+1}</td><td>${esc(p.name)}</td><td class="k">${esc(p.rear)}</td><td class="k">${esc(p.front)}</td><td>${FRAMES[p.frame].name}・${SIZES[p.size].name}</td><td>${p.t.toFixed(2)}秒</td></tr>`).join('')+'</tbody>':'';
+    $('rankMsg').textContent=list.length?`${best.size}人が参加中（上位50人まで表示）`:'まだ誰も載っていません。';
+  }catch(e){$('rankTable').innerHTML='';$('rankMsg').textContent='ランキングを読み込めませんでした。通信を確かめてください。';}
+}
+async function sendRank(){
+  const r=S.lastTA;if(!r)return;
+  const name=($('rankName').value||'').trim().slice(0,12);
+  if(!name){$('rankMsg').textContent='名前を入れてください。';return;}
+  store.set('kanrin-nick',name);$('rankSend').disabled=true;$('rankMsg').textContent='送信中…';
+  try{
+    const res=await rankReq('ta_scores',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({day:S.course.day,ver:RANK_VER,name,rear:r.rearCh,front:r.frontCh,frame:r.frame,size:r.size})});
+    if(!res.ok&&res.status!==409)throw new Error(res.status);
+    await loadRank(S.course.day);
+    $('rankMsg').textContent=(res.status===409?'この組み合わせはもう載っています。':'載せました！')+' '+$('rankMsg').textContent;
+  }catch(e){$('rankMsg').textContent='送れませんでした。通信を確かめてください。';$('rankSend').disabled=false;}
+}
 function loadAllTA(){try{const v=JSON.parse(store.get(TA_KEY)||'{}');return v&&typeof v==='object'&&!Array.isArray(v)?v:{};}catch(e){return{};}}
 function loadTA(day=S.course&&S.course.day){const v=loadAllTA()[day];return Array.isArray(v)?v:[];}
 function saveTA(list,day=S.course&&S.course.day){const all=loadAllTA();all[day]=list.slice(0,10);
@@ -1143,6 +1190,8 @@ segSetup($('speedSeg'),v=>S.speed=+v);
 function resRow(r,rank){const cell=k=>r.tt[k]>0.05?r.tt[k].toFixed(1):'-';
   return `<tr><td class="rank">${rank}</td><td><span class="dot" style="--c:${r.color}"></span>${esc(r.name)}</td><td class="k">${esc(r.rearCh)}</td><td class="k">${esc(r.frontCh)}</td><td>${FRAMES[r.frame].name}・${SIZES[r.size].name}</td><td>${r.done?r.time.toFixed(2)+'秒':'-'}</td>${TK.map(k=>`<td>${cell(k)}</td>`).join('')}</tr>`;}
 function showTA(r){
+  S.lastTA=r;$('rankBox').hidden=!rankOn();
+  if(rankOn()){$('rankSend').disabled=false;$('rankName').value=store.get('kanrin-nick')||'';loadRank(S.course.day);}
   $('taDay').textContent=`${dayLabel(S.course.day)}のコースの記録です。この端末のブラウザに保存されます。`;
   const prev=loadTA();const best=prev[0];
   const rec={t:+r.time.toFixed(3),c:r.color,fr:r.frame,sz:r.size,r:r.rearCh,f:r.frontCh,a:TK.map(k=>r.a[k]),acc:r.acc,tt:TK.map(k=>+r.tt[k].toFixed(1)),at:Date.now()};
@@ -1159,6 +1208,7 @@ function showTA(r){
   $('resLocal').hidden=false;$('resHost').hidden=true;$('resGuest').hidden=true;
 }
 $('newBtn').onclick=()=>{S.course=genCourse((Math.random()*2**31)|0);setupPlayers(true);enterThink();};
+$('rankSend').onclick=sendRank;
 $('titleBtn').onclick=()=>show('title');
 
 /* ---------- オンライン ---------- */
